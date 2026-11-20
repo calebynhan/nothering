@@ -14,12 +14,16 @@ final class DatagramRelay {
   private static let maxPeers = 256
   /// Datagrams kept per peer until its connection is ready, to resend if it falls back to NAT64.
   private static let maxUnconfirmed = 32
+  /// How much may wait for the client to take it. The direct link can be slower than cellular.
+  private static let maxUnsentBytes = 1024 * 1024
 
   private let client: ByteStream
   private unowned let server: ProxyServer
   private let onClose: () -> Void
   private var peers: [Peer: NWConnection] = [:]
   private var unconfirmed: [Peer: [Data]] = [:]
+  /// Frames handed to the client that it hasn't taken yet.
+  private var unsentBytes = 0
   private var closed = false
 
   init(client: ByteStream, server: ProxyServer, onClose: @escaping () -> Void) {
@@ -108,9 +112,14 @@ final class DatagramRelay {
   private func receive(from connection: NWConnection, peer: Peer) {
     connection.receiveMessage { [weak self] data, _, _, error in
       guard let self, !closed, peers[peer] === connection else { return }
-      if let data, !data.isEmpty, let frame = DatagramFrame.encode(data, host: peer.host, port: peer.port) {
+      // Past the limit a datagram is dropped, as a full link drops one. Queueing it would only
+      // deliver it late, and without end when the client is slower than what arrives.
+      if let data, !data.isEmpty, let frame = DatagramFrame.encode(data, host: peer.host, port: peer.port),
+         unsentBytes + frame.count <= Self.maxUnsentBytes {
+        unsentBytes += frame.count
         server.record(bytes: data.count, upstream: false)
         client.write(frame) { [weak self] error in
+          self?.unsentBytes -= frame.count
           if error != nil { self?.onClose() }
         }
       }

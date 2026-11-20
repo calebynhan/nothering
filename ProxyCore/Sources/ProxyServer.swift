@@ -193,11 +193,19 @@ public final class ProxyServer {
   /// before this returns, so the event still goes out when the process exits or `stop` closes the
   /// connections right after. On the direct link it is only handed over, and `stop` waits for it
   /// to go out, see `Mux.closeAfterFlush`.
-  public func send(_ event: ProxyEvent) {
+  ///
+  /// A caller about to exit passes `waitingUpTo`, so a client on the direct link gets a moment to
+  /// take the event before the process is gone. Not to be called on the server's queue.
+  public func send(_ event: ProxyEvent, waitingUpTo seconds: TimeInterval = 0) {
+    let taken = DispatchGroup()
     queue.sync {
       for entry in sessions.values {
-        entry.session.send(event)
+        taken.enter()
+        entry.session.send(event) { taken.leave() }
       }
+    }
+    if seconds > 0 {
+      _ = taken.wait(timeout: .now() + seconds)
     }
   }
 
@@ -215,6 +223,8 @@ public final class ProxyServer {
 
   /// A stream the Mac opened on the direct link. The pairing code already let that Mac in.
   private func accept(_ stream: MuxStream) {
+    // A connection that is saying its last words still delivers for a moment after `stop`.
+    guard isStarted else { return stream.cancel() }
     let session = Session(client: stream, server: self)
     register(session, link: .direct)
     session.start()
@@ -425,9 +435,11 @@ final class Session {
     reply(0x00)
   }
 
-  func send(_ event: ProxyEvent) {
-    guard isEventStream, replied, !closed else { return }
-    client.write(Data([event.rawValue])) { _ in }
+  /// `taken` is called once the client's connection has the event, or at once when there is
+  /// nothing to send. A stream that is dropped first never calls it.
+  func send(_ event: ProxyEvent, taken: @escaping () -> Void = {}) {
+    guard isEventStream, replied, !closed else { return taken() }
+    client.write(Data([event.rawValue])) { _ in taken() }
   }
 
   /// The client never sends anything on an event stream, so any read result means it went away.
@@ -478,6 +490,8 @@ final class Session {
       if let data, !data.isEmpty {
         server.record(bytes: data.count, upstream: isUpstream)
         destination.write(data) { [self] writeError in
+          // A write can complete after the session closed, e.g. one a connection had already taken.
+          guard !closed else { return }
           guard writeError == nil else { return close() }
           isComplete ? finish(destination) : pump(from: source, to: destination, isUpstream: isUpstream)
         }

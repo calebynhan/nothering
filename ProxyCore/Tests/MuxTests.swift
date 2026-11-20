@@ -154,6 +154,37 @@ import Testing
     #expect(result.error as? MuxError == .connectionClosed)
   }
 
+  /// While it says its last words, a connection takes up nothing new: the proxy behind it is
+  /// stopping.
+  @Test func nothingNewIsTakenUpWhileClosingAfterAFlush() async {
+    let accepted = Box<[MuxStream]>([])
+    let link = makeLink { accepted.value.append($0) }
+    _ = await link.openStream()
+    await waitUntil(on: link.queue) { accepted.value.count == 1 }
+    link.queue.async {
+      // Enough to keep the connection busy while the client's next stream arrives.
+      accepted.value[0].write(payload(200_000, seed: 5)) { _ in }
+      link.server.closeAfterFlush(on: link.queue)
+      _ = link.client.openStream()
+    }
+    await waitUntil(on: link.queue) { link.server.isClosed }
+    #expect(await onQueue(link.queue) { accepted.value.count } == 1)
+  }
+
+  /// A relay that dropped a stream isn't called back about a write the connection had already
+  /// taken. It would go on reading from a source it has closed.
+  @Test func aCancelledStreamCompletesNoWrite() async {
+    let link = makeLink { _ in }
+    let stream = await link.openStream()
+    let completed = Box(false)
+    link.queue.async {
+      stream.write(Data("on its way".utf8)) { _ in completed.value = true }
+      stream.cancel()
+    }
+    try? await Task.sleep(nanoseconds: 100_000_000)
+    #expect(await onQueue(link.queue) { !completed.value })
+  }
+
   /// A connection whose other side stopped reading is still closed, after a moment.
   @Test func closingAfterAFlushDoesNotWaitForEver() async {
     let queue = DispatchQueue(label: "MuxTests.stuck")

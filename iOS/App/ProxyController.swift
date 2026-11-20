@@ -66,6 +66,10 @@ final class ProxyController {
   /// The Mac keeps connections open only while traffic flows and probes the phone every 10 seconds,
   /// so a link stays connected for a while after its last connection.
   private static let linkTimeout: Duration = .seconds(15)
+  /// The direct link takes about ten seconds to notice that its connection is gone and a few more
+  /// to be found and connected again, so its Mac gets longer to come back before the proxy stops.
+  /// Shorter than the Mac's own pause after it lets the iPhone go.
+  private static let directLinkTimeout: Duration = .seconds(45)
   /// How long a proxy that opening the app started waits for a Mac. Past it the proxy stops, or
   /// it would play silence until the battery is empty.
   private static let openedWithoutMacTimeout: TimeInterval = 10 * 60
@@ -125,7 +129,9 @@ final class ProxyController {
   init() {
     NotificationCenter.default.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
       MainActor.assumeIsolated {
-        self?.server?.send(.terminating)
+        // The process is gone a moment after this returns. A Mac on the direct link gets that
+        // moment to take the event.
+        self?.server?.send(.terminating, waitingUpTo: 0.5)
         self?.recordUsage()
         self?.saveUsage()
         self?.terminationAlert.fireNow()
@@ -367,7 +373,9 @@ final class ProxyController {
       linkSeenAt[.direct] = now
     }
     let hadLinks = !macLinks.isEmpty
-    macLinks = Set(linkSeenAt.filter { now - $0.value < Self.linkTimeout }.keys)
+    macLinks = Set(linkSeenAt.filter {
+      now - $0.value < ($0.key == .direct ? Self.directLinkTimeout : Self.linkTimeout)
+    }.keys)
     hadMacLink = hadMacLink || !macLinks.isEmpty
     // Keeping the silent audio running with no client drains the battery, so turn off once the last Mac leaves.
     if hadLinks, macLinks.isEmpty {

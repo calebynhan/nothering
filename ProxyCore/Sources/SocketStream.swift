@@ -52,6 +52,9 @@ final class SocketStream: ByteStream {
   }
 
   func read(minimum: Int, maximum: Int, completion: @escaping (Data?, Bool, Error?) -> Void) {
+    // A relay can come back for more after it cancelled this stream, when a write it had started
+    // on the other one completes late. Nothing is read then, and no source is touched again.
+    guard !isCancelled else { return }
     pendingRead = (minimum, maximum, completion)
     // Called from a read completion: the loop in `fulfillPendingRead` picks this up, so a reader
     // chaining small reads over a large buffer doesn't recurse once per read and overflow the stack.
@@ -77,9 +80,16 @@ final class SocketStream: ByteStream {
   func cancel() {
     guard !isCancelled else { return }
     isCancelled = true
-    // A suspended dispatch source must be resumed before it can be cancelled and released.
-    if isWriteSourceSuspended { writeSource.resume() }
-    if isReadSourceSuspended { readSource.resume() }
+    // A suspended dispatch source must be resumed before it can be cancelled and released, and
+    // only once: one resume too many ends the process.
+    if isWriteSourceSuspended {
+      isWriteSourceSuspended = false
+      writeSource.resume()
+    }
+    if isReadSourceSuspended {
+      isReadSourceSuspended = false
+      readSource.resume()
+    }
     writeSource.cancel()
     readSource.cancel()
     pendingRead = nil

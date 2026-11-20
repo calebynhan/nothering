@@ -120,6 +120,8 @@ final class Relay {
       if let data, !data.isEmpty {
         onBytes(data.count, source === first)
         destination.write(data) { [self] writeError in
+          // A write can complete after the relay closed, e.g. one a connection had already taken.
+          guard !isClosed else { return }
           guard writeError == nil else { return close() }
           isComplete ? finish(destination) : pump(from: source, to: destination)
         }

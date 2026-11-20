@@ -65,6 +65,8 @@ final class Mux {
   private var streams: [UInt32: MuxStream] = [:]
   private var lastStreamID: UInt32 = 0
   private(set) var isClosed = false
+  /// Closing once what was written went out, see `closeAfterFlush`. What arrives is dropped.
+  private var isDraining = false
 
   /// `onStream` gets each stream the client opens. `onClose` is called once, with the reason when
   /// the connection failed and `nil` when either side closed it.
@@ -130,6 +132,8 @@ final class Mux {
   /// connection hasn't taken yet.
   func closeAfterFlush(on queue: DispatchQueue, within seconds: TimeInterval = 2) {
     guard !isClosed else { return }
+    // Nothing new is taken up meanwhile.
+    isDraining = true
     // A frame that says nothing: credit for a stream that doesn't exist, which the other side
     // ignores. The connection takes frames in order, so once it took this one it took all before it.
     send(.window, stream: 0, payload: Data([0, 0, 0, 0])) { [self] _ in close() }
@@ -196,6 +200,7 @@ final class Mux {
   }
 
   private func handle(_ type: FrameType, stream id: UInt32, payload: Data) {
+    guard !isDraining else { return }
     switch type {
     case .open:
       guard role == .server, id != 0, streams[id] == nil else { return close(MuxError.protocolViolation) }
@@ -373,6 +378,8 @@ final class MuxStream: ByteStream {
   }
 
   private func popChunk() {
+    // Lets go of the bytes now. The slot itself is reclaimed in batches below.
+    chunks[head] = Data()
     head += 1
     headOffset = 0
     if head == chunks.count {
@@ -417,7 +424,12 @@ final class MuxStream: ByteStream {
         // from where the data comes from, which is what slows a fast source down to this link.
         pendingWrites.removeFirst()
         writeOffset = 0
-        mux.send(.data, stream: id, payload: data[start..<start + count], completion: completion)
+        mux.send(.data, stream: id, payload: data[start..<start + count]) { [weak self] error in
+          // The connection reports on a frame it had taken whatever became of the stream. A
+          // cancelled stream completes nothing, as `cancel` promises.
+          guard let self, !isCancelled else { return }
+          completion(error)
+        }
       } else {
         writeOffset += count
         mux.send(.data, stream: id, payload: data[start..<start + count])

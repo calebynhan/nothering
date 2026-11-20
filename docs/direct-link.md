@@ -149,7 +149,9 @@ doesn't leave you without a way to look things up. `nothering` below is `~/.loca
    ```
 
 5. Lock the iPhone and repeat step 3 after five minutes. Then walk the iPhone out of range and
-   back, and repeat it again.
+   straight back, and repeat it again. Away for longer than about 45 seconds, the iPhone's proxy
+   stops for want of a Mac: the command then says its keepalive failed until the proxy is started
+   again, which the wake of step 8 does by itself.
 6. Every app. Stop the command with Control-C and start it as the Desktop launcher does:
 
    ```sh

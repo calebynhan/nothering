@@ -52,6 +52,41 @@ import Testing
     await link.waitUntilIdle()
   }
 
+  /// A relay comes back to read after it cancelled a socket, when a write it had started on the
+  /// other stream completes late. On a socket that had stopped reading, that used to resume its
+  /// dispatch source one time too many, which ends the process.
+  @Test func readingACancelledSocketIsHarmless() async {
+    let queue = DispatchQueue(label: "MuxSocketRelayTests.cancelled")
+    let (inner, outer) = makeSocketPair()
+    let stream = SocketStream(fd: inner, queue: queue)
+    // As much as the stream holds, so it stops reading from the socket.
+    let filled = 256 * 1024
+    Thread.detachNewThread { writeAll(outer, payload(filled, seed: 9)) }
+    try? await Task.sleep(nanoseconds: 500_000_000)
+    // Taken out in pieces that are all there, which leaves the stream parked.
+    let taken = Box(0)
+    for _ in 0..<4 {
+      await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        queue.async {
+          stream.read(minimum: 64 * 1024, maximum: 64 * 1024) { data, _, _ in
+            taken.value += data?.count ?? 0
+            continuation.resume()
+          }
+        }
+      }
+    }
+    #expect(await onQueue(queue) { taken.value } == filled)
+
+    let completedAfterCancel = Box(false)
+    queue.async {
+      stream.cancel()
+      stream.read(minimum: 1, maximum: 1024) { _, _, _ in completedAfterCancel.value = true }
+    }
+    try? await Task.sleep(nanoseconds: 100_000_000)
+    #expect(await onQueue(queue) { !completedAfterCancel.value })
+    Darwin.close(outer)
+  }
+
   /// An app that closes its connection mid-transfer takes the stream and the far socket with it.
   @Test func closingTheSocketEndsTheStream() async {
     let link = SocketLink()

@@ -146,7 +146,10 @@ public final class DirectLinkClient: @unchecked Sendable {
       // say so: a handshake with the wrong key can hang instead of failing.
       let serviceName = serviceName
       let own = results.map(\.endpoint).filter { endpoint in
-        if case let .service(name, _, _, _) = endpoint { return name == serviceName }
+        // Bonjour renames a service whose name is taken on the network, to "name (2)".
+        if case let .service(name, _, _, _) = endpoint {
+          return name == serviceName || name.hasPrefix(serviceName + " (")
+        }
         return false
       }
       sawAnotherPhone = results.count > own.count
