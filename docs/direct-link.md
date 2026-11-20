@@ -108,8 +108,8 @@ Nothing here has run on an iPhone yet. What has been checked, and how far that g
 
 | | Checked | How |
 |---|---|---|
-| Stream multiplexer, pairing code, pairing exchange, the wake's challenge and answer, the helper's install commands | tested | 59 tests on Linux. The cryptography ran with swift-crypto, which has CryptoKit's API |
-| Car mode's helper, watcher and installers, and the Mac installer with its launcher | tested | 109 checks against stand-ins for `ifconfig`, `scutil`, `sudo` and the rest |
+| Stream multiplexer, pairing code, pairing exchange, the wake's challenge and answer, the helper's install commands | tested | 60 tests on Linux. The cryptography ran with swift-crypto, which has CryptoKit's API |
+| Car mode's helper, watcher and installers, and the Mac installer with its launcher | tested | 118 checks against stand-ins for `ifconfig`, `scutil`, `sudo` and the rest |
 | Everything that uses Network, Security and CoreBluetooth | type-checked | against stand-ins for those frameworks on Linux, and read against Apple's real headers |
 | The same, compiled and run on a Mac | see the newest [build](../../../actions) | GitHub builds every push on a Mac, runs the tests there, and connects the two sides of the link to each other over loopback |
 | What macOS makes of the stand-in network | see the newest build's probe | a job takes its Mac off the network for a minute and writes down what it sees |
@@ -215,8 +215,8 @@ In the car it is then the double-click of step 8, and nothing on the iPhone.
   service while the app is in the background? Does iOS let the woken app start the proxy, whose
   silent audio is what keeps it running? And can the Mac then find the iPhone over Wi-Fi with the
   app never having been on screen? When the last one fails, the iPhone posts "Your Mac is
-  waiting" after 20 seconds, if notifications are allowed (**Notify if closed** asks for that), and
-  a tap on it finishes the job.
+  waiting" 20 seconds after the Mac asked, if notifications are allowed (**Notify if closed** asks
+  for that), and a tap on it finishes the job, also with **Start when opened** off.
 
 Logs from both sides:
 
@@ -246,6 +246,9 @@ log stream --predicate 'subsystem == "app.nothering"'
 - While the Mac wants the iPhone and isn't connected, it scans for it over Bluetooth about every
   20 seconds. Once the iPhone has answered and still no link came of it, each wait is twice the
   one before, up to ten minutes, until the link is there again.
+- "Your Mac is waiting" comes once for as long as the Mac keeps asking, not with every request.
+  It comes again after the app was opened, after a Mac got through, or after no Mac asked for
+  fifteen minutes. A Mac switched off and on again sooner than that doesn't ring the iPhone twice.
 - The helper goes by the network the Mac says it is on. One that leads nowhere but has a router,
   like Wi-Fi with no internet behind it, counts as the Mac's own, and no stand-in comes up. With
   `--system-proxy` the Mac's apps go through the iPhone all the same.

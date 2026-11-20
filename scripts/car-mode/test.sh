@@ -160,6 +160,28 @@ cat > "$bin/launchctl" <<'EOF'
 echo "launchctl $*" >> "$FAKE_STATE/log"
 exit 0
 EOF
+
+# lockf -k -t SECONDS FILE COMMAND...: a Mac has it. Elsewhere flock does the same, and like lockf
+# it keeps the lock to itself instead of handing it to the command.
+locks=yes
+if ! command -v lockf >/dev/null 2>&1; then
+  if command -v flock >/dev/null 2>&1; then
+    cat > "$bin/lockf" <<'EOF'
+#!/bin/sh
+[ "$1" = "-k" ] && shift
+wait=
+if [ "$1" = "-t" ]; then
+  wait="-w $2"
+  shift 2
+fi
+file=$1
+shift
+exec flock -o $wait "$file" "$@"
+EOF
+  else
+    locks=
+  fi
+fi
 chmod +x "$bin"/*
 
 # The scripts under test, with the stand-ins first on their PATH and their files somewhere a test
@@ -183,8 +205,9 @@ helper() {
   sh "$work/helper.sh" "$@"
 }
 
+# The lock file stays, as it does for the real helper: it is what the next call waits its turn on.
 none_left() {
-  ! ls "$state" | grep -q '^if-' && ! grep -q NOTHERING "$state/keys" && [ -z "$(ls "$work/run")" ]
+  ! ls "$state" | grep -q '^if-' && ! grep -q NOTHERING "$state/keys" && [ -z "$(ls "$work/run" | grep -v '\.lock$')" ]
 }
 
 # --- The copies of the helper agree -----------------------------------------------------------
@@ -279,6 +302,51 @@ kill "$owner"; wait "$owner" 2>/dev/null; sleep 3
 check "still up after the first one ended" '[ -e "$state/if-feth5478" ]'
 kill "$other"; wait "$other" 2>/dev/null; sleep 4
 check "down once the second ended" none_left
+
+echo "The helper: asked twice at once"
+if [ -n "$locks" ]; then
+  reset; sleeper; owner=$sleeper_pid
+  helper up "$owner" & first=$!
+  helper up "$owner" & second=$!
+  wait "$first"; wait "$second"
+  check "built once, and whole" '[ "$(grep -c "ifconfig feth5478 create" "$state/log")" = 1 ] && [ -e "$state/if-feth5478" ] && [ -e "$state/if-feth5479" ]'
+  helper down
+  check "down leaves nothing, and no second watcher behind" 'none_left && ! ps -ww -A -o command= | grep -q "[h]elper.sh up $owner"'
+  kill "$owner"; wait "$owner" 2>/dev/null
+else
+  echo "  skipped: no lockf and no flock on this machine, so the helper goes without its lock"
+fi
+
+echo "The helper: a watcher's end is for the stand-in it was started for"
+reset; sleeper; owner=$sleeper_pid
+helper up "$owner"
+helper expire 1; check "exit status 0" "[ $? -eq 0 ]"
+check "the end of another's watcher takes nothing down" '[ -e "$state/if-feth5478" ] && [ -e "$work/run/nothering-offline-network.watcher" ]'
+helper expire "$owner"
+check "the end of its own does" none_left
+# The watcher itself is still there, with nothing left to end.
+kill "$owner"; wait "$owner" 2>/dev/null; sleep 3
+check "and it ends with nothing left to do" '! ps -ww -A -o command= | grep -q "[h]elper.sh up $owner" && none_left'
+
+echo "The helper: what asked for it ends, and its process group is told to end, as a launch agent's is"
+if command -v perl >/dev/null 2>&1; then
+  reset; sleeper; owner=$sleeper_pid
+  # The watcher is in the group of whatever asked for it. Here that is a group of its own.
+  perl -e 'setpgrp(0, 0); exec @ARGV' sh "$work/helper.sh" up "$owner"
+  watcher=$(cat "$work/run/nothering-offline-network.watcher")
+  group=$(ps -o pgid= -p "$watcher" | tr -d ' ')
+  kill "$owner"; wait "$owner" 2>/dev/null
+  # Never this test's own group, whatever went wrong above.
+  if [ -n "$group" ] && [ "$group" != "$(ps -o pgid= -p $$ | tr -d ' ')" ]; then
+    perl -e 'kill "TERM", -$ARGV[0]' "$group"
+    sleep 4
+    check "the watcher outlives that and takes the stand-in down" none_left
+  else
+    check "the helper ran in a group of its own" false
+  fi
+else
+  echo "  skipped: no perl to make a process group with"
+fi
 
 echo "The helper: up without a port"
 reset; sleeper; owner=$sleeper_pid
@@ -399,9 +467,10 @@ try_installer() {
   check "the watcher is in place" 'cmp -s "$watcher_file" "$work/repo/car-watch.sh" && [ -x "$watcher_file" ]'
   check "the launch agent runs the watcher" 'grep -q "<string>$watcher_file</string>" "$agent" && grep -q "<string>app.nothering.car-mode</string>" "$agent"'
   check "the launch agent is started" 'grep -q "^launchctl bootstrap gui/$(id -u) $agent\$" "$state/log"'
+  check "the agent's end leaves what it started alone, the helper's watcher with it" 'grep -A1 "<key>AbandonProcessGroup</key>" "$agent" | grep -q "<true/>"'
   HOME=$work/home sh "$1" --remove > "$work/remove.out" 2>&1
   check "removes without an error" "[ $? -eq 0 ]"
-  check "nothing is left" '[ ! -e "$installed_helper" ] && [ ! -e "$installed_rules" ] && [ ! -e "$agent" ] && [ ! -e "$watcher_file" ]'
+  check "nothing is left, the helper's lock included" '[ ! -e "$installed_helper" ] && [ ! -e "$installed_rules" ] && [ ! -e "$agent" ] && [ ! -e "$watcher_file" ] && [ -z "$(ls "$work/run")" ]'
   check "the launch agent is stopped" 'grep -q "^launchctl bootout gui/$(id -u)/app.nothering.car-mode\$" "$state/log"'
 }
 

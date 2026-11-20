@@ -126,6 +126,10 @@ private final class SocketLink: @unchecked Sendable {
   /// A socket carried by a new stream, as `DirectLinkClient.connect` returns it.
   func connect() -> Int32 {
     let (mine, relayed) = makeSocketPair()
+    // So a relay that stalls fails the test instead of hanging it.
+    var timeout = timeval(tv_sec: 30, tv_usec: 0)
+    setsockopt(mine, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+    setsockopt(mine, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
     queue.sync { relay(relayed, client.openStream()!) }
     return mine
   }

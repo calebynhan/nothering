@@ -160,7 +160,9 @@ import Testing
     // handshake, instead of waiting for the rest of one.
     try? await plain.sendAsync(Data([0x05, 0x01, 0x00, 0x05, 0x01, 0x00, 0x00, 0x00]))
     let reply = try? await plain.receiveExactly(2)
-    #expect(reply == nil || reply?.isEmpty == true)
+    // The phone's TLS may answer a stranger with an alert record (0x15 0x03 ...) before it hangs
+    // up. What it must never send is a proxy's answer, which starts with the SOCKS version.
+    #expect(reply?.first != 0x05)
     #expect(server.currentStats().totalDirectConnections == 0)
   }
 

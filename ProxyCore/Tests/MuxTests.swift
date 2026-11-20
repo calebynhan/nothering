@@ -72,7 +72,7 @@ import Testing
 
     let busy = await link.openStream()
     let busyData = payload(1024 * 1024, seed: 8)
-    await waitUntil(on: link.queue) { accepted.value.count == 2 }
+    guard await waitUntil(on: link.queue, { accepted.value.count == 2 }) else { return }
     let busyServer = await onQueue(link.queue) { accepted.value[1] }
     async let busyReceived = readToEnd(busyServer, on: link.queue)
     #expect(await write(busyData, to: busy, thenEOF: true, on: link.queue) == nil)
@@ -160,7 +160,7 @@ import Testing
     let accepted = Box<[MuxStream]>([])
     let link = makeLink { accepted.value.append($0) }
     _ = await link.openStream()
-    await waitUntil(on: link.queue) { accepted.value.count == 1 }
+    guard await waitUntil(on: link.queue, { accepted.value.count == 1 }) else { return }
     link.queue.async {
       // Enough to keep the connection busy while the client's next stream arrives.
       accepted.value[0].write(payload(200_000, seed: 5)) { _ in }
@@ -253,7 +253,7 @@ import Testing
       near.write(frame(2, .data, Data("still here".utf8))) { _ in }
       near.write(frame(2, .fin)) { _ in }
     }
-    await waitUntil(on: queue) { accepted.value.count == 2 }
+    guard await waitUntil(on: queue, { accepted.value.count == 2 }) else { return }
     let overrun = await onQueue(queue) { accepted.value[0] }
     let other = await onQueue(queue) { accepted.value[1] }
     #expect(await readToEnd(other, on: queue).data == Data("still here".utf8))
@@ -359,17 +359,50 @@ func onQueue<Value>(_ queue: DispatchQueue, _ body: @escaping () -> Value) async
 
 /// Waits for `condition`, looked at on `queue`. Not for ever: a wait with no end would hold up the
 /// whole run instead of failing one test.
+@discardableResult
 func waitUntil(
   on queue: DispatchQueue, within seconds: Int = 30,
   sourceLocation: SourceLocation = #_sourceLocation, _ condition: @escaping () -> Bool
-) async {
+) async -> Bool {
   let deadline = Date().addingTimeInterval(TimeInterval(seconds))
   while !(await onQueue(queue, condition)) {
     guard Date() < deadline else {
       Issue.record("waited \(seconds) s for something that never happened", sourceLocation: sourceLocation)
-      return
+      return false
     }
     try? await Task.sleep(nanoseconds: 2_000_000)
+  }
+  return true
+}
+
+/// Ends a wait once: with what happened, or with `late` when nothing did in time. A wait with no
+/// end would hold up the whole run instead of failing one test. Used on one queue.
+final class Deadline<Value>: @unchecked Sendable {
+  private var resume: ((Value) -> Void)?
+  private var late: ((Int) -> Value)?
+
+  init(on queue: DispatchQueue, within seconds: Int = 30, late: @escaping (Int) -> Value, _ resume: @escaping (Value) -> Void) {
+    self.resume = resume
+    self.late = late
+    queue.asyncAfter(deadline: .now() + .seconds(seconds)) { [self] in
+      if let late = self.late { finish(late(seconds)) }
+    }
+  }
+
+  func finish(_ value: Value) {
+    guard let resume else { return }
+    self.resume = nil
+    late = nil
+    resume(value)
+  }
+}
+
+struct WaitedTooLong: Error, CustomStringConvertible {
+  let what: String
+  let seconds: Int
+
+  var description: String {
+    "\(what): nothing happened in \(seconds) s"
   }
 }
 
@@ -377,16 +410,19 @@ func waitUntil(
 private func write(_ data: Data, to stream: ByteStream, chunk: Int = 64 * 1024, thenEOF: Bool, on queue: DispatchQueue) async -> Error? {
   await withCheckedContinuation { continuation in
     queue.async {
+      let waiting = Deadline<Error?>(on: queue, late: { WaitedTooLong(what: "writing \(data.count) bytes", seconds: $0) }) {
+        continuation.resume(returning: $0)
+      }
       var offset = 0
       func next() {
         guard offset < data.count else {
           if thenEOF { stream.writeEOF() }
-          return continuation.resume(returning: nil)
+          return waiting.finish(nil)
         }
         let piece = data.subdata(in: offset..<min(offset + chunk, data.count))
         offset += piece.count
         stream.write(piece) { error in
-          if let error { return continuation.resume(returning: error) }
+          if let error { return waiting.finish(error) }
           next()
         }
       }
@@ -398,8 +434,11 @@ private func write(_ data: Data, to stream: ByteStream, chunk: Int = 64 * 1024, 
 private func readOnce(_ stream: ByteStream, minimum: Int, maximum: Int, on queue: DispatchQueue) async -> (data: Data?, isComplete: Bool, error: Error?) {
   await withCheckedContinuation { continuation in
     queue.async {
+      let waiting = Deadline<(data: Data?, isComplete: Bool, error: Error?)>(
+        on: queue, late: { (nil, false, WaitedTooLong(what: "reading \(minimum) bytes", seconds: $0)) }
+      ) { continuation.resume(returning: $0) }
       stream.read(minimum: minimum, maximum: maximum) { data, isComplete, error in
-        continuation.resume(returning: (data, isComplete, error))
+        waiting.finish((data, isComplete, error))
       }
     }
   }
@@ -410,11 +449,14 @@ private func readToEnd(_ stream: ByteStream, on queue: DispatchQueue) async -> (
   await withCheckedContinuation { continuation in
     queue.async {
       var received = Data()
+      let waiting = Deadline<(data: Data, error: Error?)>(
+        on: queue, late: { (received, WaitedTooLong(what: "reading to the end", seconds: $0)) }
+      ) { continuation.resume(returning: $0) }
       func next() {
         stream.read(minimum: 1, maximum: 64 * 1024) { data, isComplete, error in
           if let data { received.append(data) }
           if error != nil || isComplete || data == nil {
-            return continuation.resume(returning: (received, error))
+            return waiting.finish((received, error))
           }
           next()
         }

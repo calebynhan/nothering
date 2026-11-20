@@ -27,6 +27,12 @@ final class ExtensionController: NSObject {
   @ObservationIgnored var onRunningChange: (@MainActor () -> Void)?
   private var manager: NETransparentProxyManager?
   private var loading: Task<Void, Never>?
+  /// The turn-on under way, for whoever asks for one meanwhile. Its value says whether it went
+  /// through without an error.
+  private var turningOn: Task<Bool, Never>?
+  /// What was asked for last, on or off. A turn-on that is still waiting or saving gives way to a
+  /// later off.
+  private var isOnWanted = false
   private var isRemoving = false
   private var propertiesRequest: ObjectIdentifier?
   private var isWatchingApproval = false
@@ -47,6 +53,7 @@ final class ExtensionController: NSObject {
 
   /// Turns capture off, deletes both proxy configurations, and uninstalls the system extension.
   func removeExtension() async {
+    isOnWanted = false
     await loading?.value
     status = "Removing extension…"
     manager?.connection.stopVPNTunnel()
@@ -119,6 +126,7 @@ final class ExtensionController: NSObject {
   }
 
   func turnOff() {
+    isOnWanted = false
     manager?.connection.stopVPNTunnel()
     Task { try? await setDNSProxyEnabled(false) }
   }
@@ -143,15 +151,39 @@ final class ExtensionController: NSObject {
     await turnOn()
   }
 
+  /// One at a time. Capture only shows as on once it has started, so a second request can come
+  /// while the first is still saving the configuration, and two that save at once leave two
+  /// configurations. A request that finds one under way waits for it, and goes itself only if that
+  /// one went through and still left capture off.
   func turnOn() async {
+    isOnWanted = true
+    while let turningOn {
+      let wentThrough = await turningOn.value
+      if isRunning || !wentThrough || !isOnWanted { return }
+    }
+    let task = Task<Bool, Never> {
+      let wentThrough = await turnOnNow()
+      turningOn = nil
+      return wentThrough
+    }
+    turningOn = task
+    _ = await task.value
+  }
+
+  /// Returns whether capture was started without an error.
+  private func turnOnNow() async -> Bool {
     // Waiting for the saved configuration keeps an early turn-on from saving a duplicate one.
     await loading?.value
     do {
       let manager = try await configuredManager()
+      // Switched off while the configuration was being saved.
+      guard isOnWanted else { return false }
       try manager.connection.startVPNTunnel()
       try await setDNSProxyEnabled(true)
+      return true
     } catch {
       status = "Error: \(error.localizedDescription)"
+      return false
     }
   }
 

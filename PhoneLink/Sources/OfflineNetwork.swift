@@ -20,6 +20,14 @@ public enum OfflineNetwork {
   /// The helper's network, as the system's network state names it, and the interface it is on.
   static let serviceID = "NOTHERING-OFFLINE"
   static let interfaceName = "feth5478"
+  /// What the helper's calls wait their turn on, see the script.
+  static let lockPath = "/var/run/nothering-offline-network.lock"
+  /// Where root's own shell looks for the tools it installs with: the system's, whatever PATH it
+  /// was started with. sudo passes the caller's on, and a directory in it may be anyone's to write.
+  static let systemPath = "/usr/bin:/bin:/usr/sbin:/sbin"
+  /// One call to the helper at a time from this process. Two at once would each find the network
+  /// missing and ask for it.
+  private static let helperLock = NSLock()
 
   public static var isInstalled: Bool {
     FileManager.default.isExecutableFile(atPath: helperPath) && FileManager.default.fileExists(atPath: sudoersPath)
@@ -52,19 +60,23 @@ public enum OfflineNetwork {
     following pid: Int32 = ProcessInfo.processInfo.processIdentifier, proxyPort: UInt16? = nil
   ) -> Bool {
     guard isInstalled else { return false }
-    if isUp() { return true }
-    _ = try? run("/usr/bin/sudo", ["-n", helperPath] + upArguments(following: pid, proxyPort: proxyPort))
-    return isUp()
+    return helperLock.withLock {
+      if isUp() { return true }
+      _ = try? run("/usr/bin/sudo", ["-n", helperPath] + upArguments(following: pid, proxyPort: proxyPort))
+      return isUp()
+    }
   }
 
   /// What the helper is asked with: `up <pid>`, and the forwarder's port when apps should use it.
-  static func upArguments(following pid: Int32, proxyPort: UInt16?) -> [String] {
+  public static func upArguments(following pid: Int32, proxyPort: UInt16?) -> [String] {
     ["up", String(pid)] + (proxyPort.map { [String($0)] } ?? [])
   }
 
   public static func down() {
     guard isInstalled else { return }
-    _ = try? run("/usr/bin/sudo", ["-n", helperPath, "down"])
+    helperLock.withLock {
+      _ = try? run("/usr/bin/sudo", ["-n", helperPath, "down"])
+    }
   }
 
   /// The line a here-document with the helper in it ends on. Not a line of the helper.
@@ -76,8 +88,11 @@ public enum OfflineNetwork {
   /// person's other programs can write to while the password is being typed, least of all a
   /// script that then runs as root with no password. So nothing is read from a file that isn't
   /// root's own: each is first written where only root can write, and moved into place from there.
+  /// The tools that do it are the system's own, see `systemPath`.
   public static let installCommands = """
     set -e
+    PATH=\(systemPath)
+    export PATH
     umask 022
     mkdir -p /Library/PrivilegedHelperTools
     cat > '\(helperPath).new' <<'\(scriptEnd)'
@@ -95,7 +110,8 @@ public enum OfflineNetwork {
     """
 
   /// Takes the network down and removes what `installCommands` put in place. To be run as root.
-  public static let removeCommands = "'\(helperPath)' down; rm -f '\(sudoersPath)' '\(helperPath)'"
+  public static let removeCommands =
+    "PATH=\(systemPath); export PATH; '\(helperPath)' down; rm -f '\(sudoersPath)' '\(helperPath)' '\(lockPath)'"
 
   /// Installs the helper from an app, with the system's dialog for an administrator's password.
   public static func installWithPasswordDialog() throws {
@@ -138,6 +154,7 @@ public enum OfflineNetwork {
     #                       proxy on 127.0.0.1:<port>, as long as it is up
     #   down                take it down
     #   status              say whether it is up
+    #   expire <pid>        what its own watcher ends with: down, if it is still up for process <pid>
     PATH=/sbin:/usr/sbin:/bin:/usr/bin
     export PATH
 
@@ -149,6 +166,24 @@ public enum OfflineNetwork {
     ROUTER=198.18.0.1
     OWNER_FILE=/var/run/nothering-offline-network.owner
     WATCHER_FILE=/var/run/nothering-offline-network.watcher
+    LOCK_FILE=/var/run/nothering-offline-network.lock
+
+    # One change at a time. Two "up"s at once each take down what the other is putting up, and both
+    # leave a watcher behind. So whatever changes the stand-in runs once more under lockf, which waits
+    # its turn. The lock stays with lockf: neither this script nor the watcher it leaves holds it. A
+    # system without lockf goes without.
+    case "${1:-}" in
+      up | down | expire)
+        if [ "${NOTHERING_OFFLINE_LOCKED:-}" != 1 ] && command -v lockf >/dev/null 2>&1; then
+          NOTHERING_OFFLINE_LOCKED=1
+          export NOTHERING_OFFLINE_LOCKED
+          # Root's alone: whoever can open the lock file can hold the lock.
+          umask 077
+          exec lockf -k -t 30 "$LOCK_FILE" /bin/sh "$0" "$@"
+        fi
+        ;;
+    esac
+    umask 022
 
     # The service the Mac is on for IPv4 or IPv6, as the system's network state names it. Empty when
     # it is on none.
@@ -202,6 +237,15 @@ public enum OfflineNetwork {
         esac
       fi
       teardown
+    }
+
+    # What a watcher ends with: down, if the stand-in is still the one it was started for. Not "down"
+    # itself, which ends the watcher on file, and that is the one asking.
+    expire() {
+      if [ -f "$OWNER_FILE" ] && [ "$(cat "$OWNER_FILE")" = "$1" ]; then
+        rm -f "$WATCHER_FILE"
+        teardown
+      fi
     }
 
     up() {
@@ -271,14 +315,16 @@ public enum OfflineNetwork {
       route -n add default "$ROUTER" >/dev/null 2>&1
       echo "$owner" > "$OWNER_FILE"
       # Takes it all down again without being asked, so a Mac is never left on a network that
-      # leads nowhere after the process it was for is gone.
+      # leads nowhere after the process it was for is gone. It has to outlive what asked for it: a
+      # launch agent's end comes with a signal to end for everything the agent started.
       (
-        trap '' HUP INT
+        trap '' HUP INT TERM
         while kill -0 "$owner" 2>/dev/null && ! other_network; do
           sleep 2
         done
-        rm -f "$WATCHER_FILE"
-        teardown
+        # In its turn, like any other change.
+        NOTHERING_OFFLINE_LOCKED=
+        exec /bin/sh "$0" expire "$owner"
       ) </dev/null >/dev/null 2>&1 &
       echo $! > "$WATCHER_FILE"
     }
@@ -286,6 +332,7 @@ public enum OfflineNetwork {
     case "${1:-}" in
       up) up "${2:-}" "${3:-}" ;;
       down) down ;;
+      expire) expire "${2:-}" ;;
       status) if is_up; then echo up; else echo down; fi ;;
       *)
         echo "usage: $0 up <pid> [<port>] | down | status" >&2

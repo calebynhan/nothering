@@ -161,6 +161,10 @@ final class PhoneForwarder {
   private static let switchOnPatience: TimeInterval = 60
   /// How long switching off counts while capture still shows as on.
   private static let switchOffSettle: TimeInterval = 5
+  /// How long capture that went off with nobody switching it off still counts as on. macOS may
+  /// stop it and start it again by itself. Letting the link and the stand-in network go for that
+  /// moment would change the Mac's network under it once more, and wake the iPhone for nothing.
+  private static let captureRestartGrace: TimeInterval = 10
 
   /// Whether capture is on, as the switch shows it. Set by the app.
   @ObservationIgnored var isCaptureOn: @MainActor () -> Bool = { false }
@@ -177,6 +181,8 @@ final class PhoneForwarder {
   /// The last time capture was switched, by the person or to follow the iPhone's proxy. It takes
   /// a moment to show in `isCaptureOn`, in either direction.
   @ObservationIgnored private var lastSwitch: (on: Bool, byHand: Bool, at: Date)?
+  /// When capture last went off, however that came about.
+  @ObservationIgnored private var captureWentOffAt = Date.distantPast
   /// The person stopped the proxy on the iPhone. It isn't woken again until they start it there, or
   /// switch capture on here.
   @ObservationIgnored private var isWakeHeld = false
@@ -204,6 +210,9 @@ final class PhoneForwarder {
   /// Capture turned on or off, by the switch or any other way, e.g. it was still on from before
   /// the app was opened. The link and the stand-in network follow it.
   func captureChanged() {
+    if !isCaptureOn() {
+      captureWentOffAt = .now
+    }
     refreshLink()
   }
 
@@ -214,7 +223,10 @@ final class PhoneForwarder {
       if lastSwitch.on, age < Self.switchOnPatience { return true }
       if !lastSwitch.on, age < Self.switchOffSettle { return false }
     }
-    return isCaptureOn()
+    if isCaptureOn() { return true }
+    // Off, and not by the switch: it may be on its way back, see `captureRestartGrace`. If it
+    // isn't, the next look at the link lets the iPhone go.
+    return lastSwitch?.on != false && Date.now.timeIntervalSince(captureWentOffAt) < Self.captureRestartGrace
   }
 
   /// Whether the direct link is kept at all right now: only while somebody asked for the iPhone.
@@ -393,8 +405,13 @@ final class PhoneForwarder {
         }
         if self.autoTurnOn, wasReachable != isReachable {
           // Counts like the switch, in both directions: the Mac gets its stand-in network before
-          // capture needs it, and an iPhone whose proxy went isn't woken right back.
-          self.lastSwitch = (isReachable, false, .now)
+          // capture needs it, and an iPhone whose proxy went isn't woken right back. A switch-on
+          // by hand that is still waiting for capture stays one: asked for again, it is the
+          // person's request, which may be the first ever and macOS's question with it.
+          let isStillByHand = isReachable && self.lastSwitch.map {
+            $0.on && $0.byHand && Date.now.timeIntervalSince($0.at) < Self.switchOnPatience
+          } == true
+          self.lastSwitch = (isReachable, isStillByHand, .now)
           self.onAutoTurnOn?(isReachable)
         }
         self.wakePhoneIfWanted()

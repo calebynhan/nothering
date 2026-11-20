@@ -50,7 +50,7 @@ if [ "${1:-}" = "--remove" ]; then
   stop_watcher
   rm -f "$AGENT" "$WATCHER"
   echo "Removing the helper needs an administrator's password."
-  sudo /bin/sh -c "'$HELPER' down; rm -f '$RULES' '$HELPER'"
+  sudo /bin/sh -c "'$HELPER' down; rm -f '$RULES' '$HELPER' /var/run/nothering-offline-network.lock"
   echo "Car mode is removed."
   exit 0
 fi
@@ -82,6 +82,8 @@ mv -f '$HELPER.rule' '$RULES'"
 mkdir -p "$SUPPORT" "$HOME/Library/LaunchAgents"
 script_text car-watch.sh > "$WATCHER"
 chmod 755 "$WATCHER"
+# AbandonProcessGroup: when the agent ends, what it started is left alone. That includes the
+# helper's own watcher, which has to stay to take the stand-in down once the agent is gone.
 cat > "$AGENT" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -100,6 +102,8 @@ cat > "$AGENT" <<PLIST
 	<true/>
 	<key>ProcessType</key>
 	<string>Background</string>
+	<key>AbandonProcessGroup</key>
+	<true/>
 </dict>
 </plist>
 PLIST

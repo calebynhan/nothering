@@ -216,7 +216,8 @@ struct ContentView: View {
   private func opened() async {
     if CommandLine.arguments.contains("--autostart") || controller.shouldRestore, !controller.isRunning {
       await controller.start()
-    } else if startsWhenOpened {
+    } else if startsWhenOpened || controller.wasOpenedForMac {
+      // Also when the person was asked to open the app for a Mac and did, whatever the toggle says.
       await controller.startBecauseOpened()
     }
   }

@@ -56,7 +56,10 @@ cp "$tool" "$out/nothering"
 # when it asks. Without either the wake is refused without a question.
 entitlements=$(codesign -d --entitlements - "$out/nothering" 2>&1 || true)
 [[ $entitlements == *com.apple.security.device.bluetooth* ]] || { echo "the Mac tool lacks the Bluetooth entitlement: $entitlements" >&2; exit 1; }
-otool -l "$out/nothering" | grep -q __info_plist || { echo "the Mac tool carries no Info.plist" >&2; exit 1; }
+# Taken whole first: a reader that stops at its first match can leave otool writing into a closed
+# pipe, and under pipefail that reads as "not there".
+sections=$(otool -l "$out/nothering")
+[[ $sections == *__info_plist* ]] || { echo "the Mac tool carries no Info.plist" >&2; exit 1; }
 
 # The installers, pointing at this repository's releases.
 sed "s|__REPOSITORY__|$repo|g" "$root/scripts/direct/install-mac.sh" > "$out/install-mac.sh"

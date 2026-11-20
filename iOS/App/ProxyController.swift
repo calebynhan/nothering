@@ -57,14 +57,27 @@ final class ProxyController {
   @ObservationIgnored private var starting: Task<Void, Never>?
   /// What the running proxy was started for.
   @ObservationIgnored private var startReason = StartReason.hand
+  /// The running proxy's wait for the Mac that asked last has had its look at the 20-second mark.
   @ObservationIgnored private var didAskToOpen = false
-  /// When the person was last asked to open the app, see `askToOpenAgainAfter`.
-  @ObservationIgnored private var askedToOpenAt = Date.distantPast
+  /// The person was asked to open the app for a Mac, and neither opened it nor did a Mac get
+  /// through since. One notification per such wait.
+  @ObservationIgnored private var isMacWaiting = false
+  /// When a paired Mac last asked over Bluetooth, see `macSilenceEndsWait`.
+  @ObservationIgnored private var lastWokenAt = Date.distantPast
+  /// When a paired Mac last asked the running proxy to be there, until one gets through or the
+  /// proxy stops.
+  @ObservationIgnored private var macAskedAt: Date?
   @ObservationIgnored private var hadMacLink = false
+  /// Since when the running proxy has waited for a Mac: its start, or the moment the person
+  /// opened the app for one a Mac had woken.
+  @ObservationIgnored private var waitingSince = Date.distantPast
   /// Lets a paired Mac start the proxy over Bluetooth, see `DirectLinkWake`.
   @ObservationIgnored private var wakeBeacon: DirectLinkWakeBeacon?
   /// The person has the app in front of them.
   @ObservationIgnored private var isInFront = false
+  /// The person was asked to open the app for a Mac that is still asking, and did. Until the app
+  /// leaves the front that counts like "Start when opened", see `ContentView.opened()`.
+  @ObservationIgnored private(set) var wasOpenedForMac = false
 
   struct PairingPrompt: Identifiable {
     let id = UUID()
@@ -93,9 +106,11 @@ final class ProxyController {
   private static let wokenWithoutMacTimeout: TimeInterval = 2 * 60
   /// How long after a wake the Mac may take to connect before the person is asked to open the app.
   private static let askToOpenAfter: TimeInterval = 20
-  /// How long the person isn't asked again. The Mac keeps waking the iPhone for as long as it is
-  /// switched on, and every notification rings.
-  private static let askToOpenAgainAfter: TimeInterval = 10 * 60
+  /// A Mac that hasn't asked for this long has given up, and the next one to ask starts a new
+  /// wait with a notification of its own. Longer than a Mac's longest pause between two requests,
+  /// which is ten minutes: it keeps asking for as long as it is switched on, and a notification
+  /// for each request would ring all night.
+  private static let macSilenceEndsWait: TimeInterval = 15 * 60
   private static let askToOpenIdentifier = "wake"
 
   private var server: ProxyServer?
@@ -183,7 +198,20 @@ final class ProxyController {
   /// certain after Bluetooth was off, and when a change in Settings shows.
   func cameToFront() {
     isInFront = true
+    if isMacWaiting, Date.now.timeIntervalSince(lastWokenAt) < Self.macSilenceEndsWait {
+      // Asked to open the app for a Mac, and here it is: that is asking for the proxy, whatever
+      // "Start when opened" says. The view starts it, after a proxy left on had its turn.
+      wasOpenedForMac = true
+    }
     waitForMacIsOver()
+    if isRunning, wasStartedByWake, !hadMacLink {
+      // Opened for the Mac that woke it. From here it waits like one that opening started, and
+      // not for what is left of the wake's two minutes.
+      wasStartedByWake = false
+      wasStartedByOpening = true
+      startReason = .opened
+      waitingSince = .now
+    }
     updatePairing()
     #if !targetEnvironment(simulator)
       wakeBeacon?.refresh()
@@ -224,6 +252,11 @@ final class ProxyController {
 
   /// Replaces the pairing code. Macs paired with the old one are let go, and have to pair again.
   func newPairingCode() async {
+    // A start under way was given the old code, and would go on serving it. Once it is done it
+    // is stopped like any other.
+    while let starting {
+      await starting.value
+    }
     let wasRunning = isRunning
     let reason = startReason
     if wasRunning { stop() }
@@ -232,8 +265,9 @@ final class ProxyController {
     wakeBeacon?.use(code: directLinkCode)
     hasPairedMac = false
     pairingOpenUntil = .distantPast
-    // As what it was: one that opening the app started keeps its time limit.
-    if wasRunning { await start(reason) }
+    // As what it was, with its time limit. A proxy the Mac woke comes back as one that opening
+    // started: that Mac was just let go, and nobody is waiting.
+    if wasRunning { await start(reason == .woken ? .opened : reason) }
   }
 
   func setFocusSound(_ sound: FocusSound) {
@@ -272,6 +306,7 @@ final class ProxyController {
 
   func didEnterBackground() {
     wasStoppedByHand = false
+    wasOpenedForMac = false
     isInFront = false
     pairingOpenUntil = .distantPast
     updatePairing()
@@ -279,11 +314,26 @@ final class ProxyController {
 
   /// A paired Mac asked for the proxy over Bluetooth, so nobody has to pick up the iPhone.
   func startBecauseWoken() async {
-    guard !isRunning else { return }
-    await start(.woken)
-    if !isRunning {
+    if Date.now.timeIntervalSince(lastWokenAt) > Self.macSilenceEndsWait {
+      isMacWaiting = false
+    }
+    lastWokenAt = .now
+    guard !isRunning else {
+      // The proxy is there already, but the Mac that asks still has to find it. Its wait starts
+      // here, as it would for a proxy this request had started.
+      if macLinks.isEmpty {
+        macAskedAt = .now
+        didAskToOpen = false
+      }
+      return
+    }
+    // A proxy the person had left on, which iOS ended with the app, comes back as theirs.
+    await start(shouldRestore ? .hand : .woken)
+    if isRunning {
+      macAskedAt = .now
+    } else if starting == nil {
       // iOS didn't let the proxy start in the background. A tap on the notification opens the
-      // app, which starts it.
+      // app, which starts it. A proxy that is being started over is no failed start.
       askToOpen()
     }
   }
@@ -291,14 +341,15 @@ final class ProxyController {
   /// The person opened the app, or the Mac got through: the notification that asked for the app
   /// to be opened has nothing left to say, and the next wait may ask again.
   private func waitForMacIsOver() {
-    askedToOpenAt = .distantPast
+    isMacWaiting = false
     UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [Self.askToOpenIdentifier])
   }
 
-  /// The fallback when a wake isn't enough. Shows only if notifications are allowed.
+  /// The fallback when a wake isn't enough. Shows only if notifications are allowed. Once per
+  /// wait, however often the Mac asks.
   private func askToOpen() {
-    guard Date.now.timeIntervalSince(askedToOpenAt) > Self.askToOpenAgainAfter else { return }
-    askedToOpenAt = .now
+    guard !isMacWaiting else { return }
+    isMacWaiting = true
     let content = UNMutableNotificationContent()
     content.title = String(localized: "Your Mac is waiting")
     content.body = String(localized: "Open Nothering to let your Mac use this iPhone's connection.")
@@ -353,7 +404,22 @@ final class ProxyController {
   /// take the first one's keeper down with it.
   func start(_ reason: StartReason = .hand) async {
     if let starting {
-      return await starting.value
+      await starting.value
+      // The start that was under way may have been for less. A tap on Start makes the proxy the
+      // person's: no time limit, and back after iOS ended the app. Opening the app gives one a
+      // Mac woke the time an opened one gets.
+      if isRunning, reason == .hand, startReason != .hand {
+        startReason = .hand
+        wasStartedByOpening = false
+        wasStartedByWake = false
+        UserDefaults.standard.set(true, forKey: Self.wasRunningKey)
+      } else if isRunning, reason == .opened, startReason == .woken, !hadMacLink {
+        startReason = .opened
+        wasStartedByOpening = true
+        wasStartedByWake = false
+        waitingSince = .now
+      }
+      return
     }
     guard !isRunning else { return }
     let task = Task {
@@ -398,9 +464,11 @@ final class ProxyController {
     wasStartedByWake = reason == .woken
     didAskToOpen = false
     hadMacLink = false
+    macAskedAt = nil
     saveUsage()
     let startedAt = Date.now
     self.startedAt = startedAt
+    waitingSince = startedAt
     lastSampledAt = .now
     isRunning = true
     // Only a proxy the person started comes back as one after iOS ended the app. One that opening
@@ -428,6 +496,7 @@ final class ProxyController {
     startedAt = nil
     directLinkProblem = nil
     answerPairing(false)
+    macAskedAt = nil
     isSessionNew = false
     isRunning = false
     UserDefaults.standard.set(false, forKey: Self.wasRunningKey)
@@ -500,19 +569,33 @@ final class ProxyController {
       hadMacLink = true
       waitForMacIsOver()
     }
+    if !macLinks.isEmpty {
+      macAskedAt = nil
+    }
     // Keeping the silent audio running with no client drains the battery, so turn off once the last Mac leaves.
     if hadLinks, macLinks.isEmpty {
       stop()
-    } else if !hadMacLink, let startedAt, let limit = unattendedTimeout {
-      let waited = Date.now.timeIntervalSince(startedAt)
-      if waited > limit {
-        // Nobody tapped Start for this one, and no Mac came for it.
-        stop()
-      } else if wasStartedByWake, !didAskToOpen, waited > Self.askToOpenAfter {
-        // The Mac that woke the app can't find it. From the background it may not be able to,
-        // and opening the app fixes that.
-        didAskToOpen = true
+      return
+    }
+    if let macAskedAt, !didAskToOpen, Date.now.timeIntervalSince(macAskedAt) > Self.askToOpenAfter {
+      // The Mac that asked can't find the proxy, whatever it was started for. From the background
+      // it may not be able to, and opening the app fixes that.
+      didAskToOpen = true
+      // With the app in front there is nothing to open, and that doesn't count as having asked:
+      // the Mac's next request gets its own look.
+      if !isInFront {
         askToOpen()
+      }
+    }
+    if !hadMacLink, let limit = unattendedTimeout {
+      // Nobody tapped Start for this one, and no Mac came for it. It waits its own time, and
+      // never less than the wake's from a Mac's last request.
+      var end = waitingSince.addingTimeInterval(limit)
+      if let macAskedAt {
+        end = max(end, macAskedAt.addingTimeInterval(Self.wokenWithoutMacTimeout))
+      }
+      if Date.now > end {
+        stop()
       }
     }
   }

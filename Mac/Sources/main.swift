@@ -37,7 +37,26 @@ var helperAction: String?
 /// Asks the iPhone for its proxy again when the direct link is down, and does nothing while it is
 /// up. Set when --wake is given.
 var wakePhoneIfDown: (() -> Void)?
+/// Drops a request to the iPhone that is under way. Set when --wake is given.
+var cancelWake: (() -> Void)?
 var useSystemProxy = false
+
+/// The tool is on its way out: the iPhone said its proxy was stopped there or its app closed, or
+/// the person stopped the tool. Nothing asks the iPhone again after that. Putting the Mac back
+/// takes a moment, and the keepalive runs on a queue of its own meanwhile.
+final class Ending: @unchecked Sendable {
+  private let lock = NSLock()
+  private var isSet = false
+
+  func set() {
+    lock.withLock { isSet = true }
+  }
+
+  var value: Bool {
+    lock.withLock { isSet }
+  }
+}
+let ending = Ending()
 
 var arguments = CommandLine.arguments.dropFirst().makeIterator()
 while let argument = arguments.next() {
@@ -121,7 +140,10 @@ func keepMacOnline(isLinked: Bool) {
     }
   } else if !didExplainHelper {
     didExplainHelper = true
-    print("nothering: this Mac has no network of its own, and the helper didn't give it a stand-in, so its apps won't try to connect. This says why: sudo -n \(OfflineNetwork.helperPath) up \(getpid())")
+    // The same request the tool makes, port and all: run by hand, it must not leave a stand-in
+    // other than the one the tool asks for.
+    let asked = OfflineNetwork.upArguments(following: getpid(), proxyPort: useSystemProxy ? port : nil)
+    print("nothering: this Mac has no network of its own, and the helper didn't give it a stand-in, so its apps won't try to connect. This says why: sudo -n \(OfflineNetwork.helperPath) \(asked.joined(separator: " "))")
   }
 }
 
@@ -215,6 +237,7 @@ if via == "direct" {
       if isNew { print("nothering: \(message)") }
     }
     let wake = {
+      guard !ending.value else { return }
       let isConnected = client.currentStatus == .connected
       let isDue = asking.lock.withLock {
         if isConnected {
@@ -244,6 +267,7 @@ if via == "direct" {
     print("nothering: waking the iPhone over Bluetooth")
     wake()
     wakePhoneIfDown = wake
+    cancelWake = { waker.cancel() }
   }
   print("nothering: looking for the iPhone over Wi-Fi")
   // A woken iPhone needs to be found over Bluetooth and to start its proxy first.
@@ -317,6 +341,8 @@ if useSystemProxy {
 
 /// Puts the Mac back as it was and ends. On the main queue.
 func stop(_ message: String) -> Never {
+  ending.set()
+  cancelWake?()
   systemProxy?.restore()
   forwarder.stop()
   keepMacOnline(isLinked: false)
@@ -334,14 +360,17 @@ for signalNumber in [SIGINT, SIGTERM, SIGHUP] {
 }
 
 // The iPhone says when its person stops the proxy there, or closes the app. Going on would undo
-// that: the keepalive below would ask the iPhone to start again, and get its way.
+// that: the keepalive below would ask the iPhone to start again, and get its way. So the end is
+// marked here, where the word arrives, and not only once the main queue gets to it.
 let phoneEvents = PhoneEventListener()
 func listenToPhone() {
   phoneEvents.listen(connect: { try connectUpstream() }) { update in
     switch update {
     case .event(.stopped):
+      ending.set()
       DispatchQueue.main.async { stop("the proxy was stopped on the iPhone") }
     case .event(.terminating):
+      ending.set()
       DispatchQueue.main.async { stop("Nothering was closed on the iPhone. Open it there to connect again") }
     case .opened, .closed:
       break
@@ -355,6 +384,7 @@ listenToPhone()
 let keepalive = DispatchSource.makeTimerSource(queue: .global())
 keepalive.schedule(deadline: .now() + 10, repeating: 10)
 keepalive.setEventHandler {
+  guard !ending.value else { return }
   do {
     Darwin.close(try connectUpstream())
     keepMacOnline(isLinked: true)

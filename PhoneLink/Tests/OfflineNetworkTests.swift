@@ -28,6 +28,7 @@ import Testing
     let lines = OfflineNetwork.script.split(separator: "\n").map(String.init)
     #expect(lines.contains("SERVICE=\(OfflineNetwork.serviceID)"))
     #expect(lines.contains("NEAR=\(OfflineNetwork.interfaceName)"))
+    #expect(lines.contains("LOCK_FILE=\(OfflineNetwork.lockPath)"))
   }
 
   /// The script is a string in the source. A here-document only ends on a line that is exactly its
@@ -42,6 +43,8 @@ import Testing
     #expect(!OfflineNetwork.script.contains("eval"))
     // Deleting a default route takes the one of whatever network the Mac is on by then.
     #expect(!lines.contains { $0.contains("route") && $0.contains("delete") && !$0.hasPrefix("  #") })
+    // Its watcher outlives the signal that comes with the end of what asked for it.
+    #expect(lines.contains("    trap '' HUP INT TERM"))
   }
 
   /// The forwarder's port is passed only when apps should be pointed at it.
@@ -68,6 +71,16 @@ import Testing
     #expect(!OfflineNetwork.script.split(separator: "\n").contains { $0 == OfflineNetwork.scriptEnd })
   }
 
+  /// sudo hands root the caller's PATH. What root installs and removes with must be the system's
+  /// own tools, not whatever a directory earlier in that PATH has under their names.
+  @Test func rootUsesTheSystemsOwnTools() {
+    #expect(OfflineNetwork.systemPath.split(separator: ":").allSatisfy { ["/usr/bin", "/bin", "/usr/sbin", "/sbin"].contains($0) })
+    #expect(OfflineNetwork.installCommands.hasPrefix("set -e\nPATH=\(OfflineNetwork.systemPath)\nexport PATH\n"))
+    #expect(OfflineNetwork.removeCommands.hasPrefix("PATH=\(OfflineNetwork.systemPath); export PATH; "))
+    // The lock goes with the rest.
+    #expect(OfflineNetwork.removeCommands.hasSuffix("'\(OfflineNetwork.lockPath)'"))
+  }
+
   /// The install commands as root runs them, with the system's places moved under a temporary
   /// directory and stand-ins for the two steps that need root or sudo's own tools.
   @Test func theInstallCommandsPutTheHelperAndItsRuleInPlace() throws {
@@ -84,13 +97,16 @@ import Testing
       try "#!/bin/sh\nexit 0\n".write(to: file, atomically: true, encoding: .utf8)
       try files.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
     }
+    // The commands look nowhere but in the system's places, so the stand-ins are put in there.
+    let path = "PATH=\(OfflineNetwork.systemPath)\n"
     let commands = OfflineNetwork.installCommands
       .replacingOccurrences(of: "/Library/PrivilegedHelperTools", with: helpers.path)
       .replacingOccurrences(of: "/etc/sudoers.d", with: rules.path)
+      .replacingOccurrences(of: path, with: "PATH=\(tools.path):\(OfflineNetwork.systemPath)\n")
 
     let shell = Process()
     shell.executableURL = URL(fileURLWithPath: "/bin/sh")
-    shell.arguments = ["-c", "PATH=\(tools.path):$PATH\n\(commands)"]
+    shell.arguments = ["-c", commands]
     try shell.run()
     shell.waitUntilExit()
     #expect(shell.terminationStatus == 0)

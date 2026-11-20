@@ -4,33 +4,33 @@ import Testing
 @testable import ProxyCore
 
 @Suite struct DirectLinkPairingTests {
-  @Test func allowingGivesTheMacThePhonesCode() async {
+  @Test func allowingGivesTheMacThePhonesCode() async throws {
     let pairing = Pairing(code: "K7QM-2XBD-9RTH-W4PN-6CEA", name: "Test Mac")
-    let request = await pairing.request()
+    let request = try await pairing.request()
     #expect(request.name == "Test Mac")
     // The person compares this number with the one on the Mac.
-    let shown = await pairing.digitsOnTheMac()
+    let shown = try await pairing.digitsOnTheMac()
     #expect(request.digits == shown)
     #expect(shown.count == 7)
     #expect(shown.filter(\.isNumber).count == 6)
 
     request.answer(true)
-    #expect(await pairing.result() == .success("K7QM-2XBD-9RTH-W4PN-6CEA"))
+    #expect(try await pairing.result() == .success("K7QM-2XBD-9RTH-W4PN-6CEA"))
     #expect(await pairing.ends() == [.allowed])
   }
 
-  @Test func refusingGivesTheMacNothing() async {
+  @Test func refusingGivesTheMacNothing() async throws {
     let pairing = Pairing(code: "K7QM-2XBD-9RTH-W4PN-6CEA", name: "Test Mac")
-    let request = await pairing.request()
+    let request = try await pairing.request()
     request.answer(false)
-    #expect(await pairing.result() == .failure(.refused))
+    #expect(try await pairing.result() == .failure(.refused))
     #expect(await pairing.ends() == [.refused])
   }
 
   /// A Mac that gives up takes its question off the phone's screen, and a late tap does nothing.
-  @Test func aMacThatLeavesEndsTheQuestion() async {
+  @Test func aMacThatLeavesEndsTheQuestion() async throws {
     let pairing = Pairing(code: "K7QM-2XBD-9RTH-W4PN-6CEA", name: "Test Mac")
-    let request = await pairing.request()
+    let request = try await pairing.request()
     pairing.queue.async { pairing.requester.cancel() }
     #expect(await pairing.ends() == [.leftAsking])
     request.answer(true)
@@ -40,11 +40,11 @@ import Testing
 
   /// Someone in between holds two attempts, one with each side, and they come out with different
   /// numbers. Seeing that is what the person is asked to check before allowing.
-  @Test func someoneInBetweenShowsDifferentNumbers() async {
+  @Test func someoneInBetweenShowsDifferentNumbers() async throws {
     let withTheMac = Pairing(code: "AAAA-AAAA-AAAA-AAAA-AAAA", name: "Test Mac")
     let withThePhone = Pairing(code: "K7QM-2XBD-9RTH-W4PN-6CEA", name: "Test Mac")
-    let onTheMac = await withTheMac.digitsOnTheMac()
-    let onThePhone = await withThePhone.request().digits
+    let onTheMac = try await withTheMac.digitsOnTheMac()
+    let onThePhone = try await withThePhone.request().digits
     #expect(onTheMac != onThePhone)
   }
 
@@ -94,7 +94,7 @@ import Testing
         near.write(key + nonce) { _ in }
       }
     }
-    await waitUntil(on: queue) { !asked.value.isEmpty }
+    guard await waitUntil(on: queue, { !asked.value.isEmpty }) else { return }
     #expect(await onQueue(queue) { asked.value[0].name } == "A Mac")
     queue.async { responder.cancel() }
   }
@@ -239,10 +239,10 @@ import Testing
   }
 
   /// A question nobody answers counts as a no, for the Mac and for whoever takes it off the screen.
-  @Test func aQuestionNobodyAnswersIsRefusedInTime() async {
+  @Test func aQuestionNobodyAnswersIsRefusedInTime() async throws {
     let pairing = Pairing(code: "K7QM-2XBD-9RTH-W4PN-6CEA", name: "Test Mac", answerTimeout: 0.1)
-    _ = await pairing.request()
-    #expect(await pairing.result() == .failure(.refused))
+    _ = try await pairing.request()
+    #expect(try await pairing.result() == .failure(.refused))
     #expect(await pairing.ends() == [.refused])
   }
 
@@ -283,7 +283,7 @@ import Testing
         }
       }
     }
-    await waitUntil(on: queue) { !onTheMac.value.isEmpty && !onThePhone.value.isEmpty }
+    guard await waitUntil(on: queue, { !onTheMac.value.isEmpty && !onThePhone.value.isEmpty }) else { return }
     #expect(await onQueue(queue) { onTheMac.value[0] != onThePhone.value[0] })
     queue.async {
       responder.cancel()
@@ -358,19 +358,19 @@ private final class Pairing: @unchecked Sendable {
   }
 
   /// What the phone asks its person.
-  func request() async -> DirectLinkPairingRequest {
+  func request() async throws -> DirectLinkPairingRequest {
     await waitUntil(on: queue) { [self] in !requests.isEmpty }
-    return await onQueue(queue) { [self] in requests[0] }
+    return try #require(await onQueue(queue) { [self] in requests.first })
   }
 
-  func digitsOnTheMac() async -> String {
+  func digitsOnTheMac() async throws -> String {
     await waitUntil(on: queue) { [self] in !digits.isEmpty }
-    return await onQueue(queue) { [self] in digits[0] }
+    return try #require(await onQueue(queue) { [self] in digits.first })
   }
 
-  func result() async -> Result<String, DirectLinkPairingError> {
+  func result() async throws -> Result<String, DirectLinkPairingError> {
     await waitUntil(on: queue) { [self] in !results.isEmpty }
-    return await onQueue(queue) { [self] in results[0] }
+    return try #require(await onQueue(queue) { [self] in results.first })
   }
 
   /// How the phone's side ended, for each time it did.
