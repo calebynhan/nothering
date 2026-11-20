@@ -34,8 +34,9 @@ var code: String?
 var pairAgain = false
 var wakesPhone = false
 var helperAction: String?
-/// Asks the iPhone for its proxy again when the direct link is down. Set when --wake is given.
-var wakePhoneAgain: (() -> Void)?
+/// Asks the iPhone for its proxy again when the direct link is down, and does nothing while it is
+/// up. Set when --wake is given.
+var wakePhoneIfDown: (() -> Void)?
 var useSystemProxy = false
 
 var arguments = CommandLine.arguments.dropFirst().makeIterator()
@@ -60,29 +61,26 @@ func fail(_ message: String) -> Never {
   exit(1)
 }
 
-/// Runs a command on this terminal, so sudo can ask for the password here.
+/// Runs a command on this terminal and waits for it, so sudo can ask for the password here. Not
+/// with `Process`, which starts the command in a group of its own: the terminal only lets the
+/// group in front of it read a password, and sudo would wait for a turn that never comes.
 func runOnTerminal(_ executable: String, _ arguments: [String]) -> Bool {
-  let process = Process()
-  process.executableURL = URL(fileURLWithPath: executable)
-  process.arguments = arguments
-  do {
-    try process.run()
-  } catch {
-    return false
+  let argv: [UnsafeMutablePointer<CChar>?] = ([executable] + arguments).map { strdup($0) } + [nil]
+  let environment: [UnsafeMutablePointer<CChar>?] =
+    ProcessInfo.processInfo.environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
+  defer { (argv + environment).forEach { free($0) } }
+  var pid = pid_t()
+  guard posix_spawn(&pid, executable, nil, nil, argv, environment) == 0 else { return false }
+  var status: Int32 = 0
+  while waitpid(pid, &status, 0) == -1 {
+    guard errno == EINTR else { return false }
   }
-  process.waitUntilExit()
-  return process.terminationStatus == 0
+  return status == 0
 }
 
 if helperAction == "--install-helper" {
   print("nothering: installing the helper for a Mac with no network of its own. sudo asks for your password")
-  let commands: String
-  do {
-    commands = try OfflineNetwork.installCommands()
-  } catch {
-    fail(error.localizedDescription)
-  }
-  guard runOnTerminal("/usr/bin/sudo", ["/bin/sh", "-c", commands]), OfflineNetwork.isInstalled else {
+  guard runOnTerminal("/usr/bin/sudo", ["/bin/sh", "-c", OfflineNetwork.installCommands]), OfflineNetwork.isInstalled else {
     fail("the helper wasn't installed")
   }
   print("nothering: installed at \(OfflineNetwork.helperPath)")
@@ -107,16 +105,23 @@ func keepMacOnline(isLinked: Bool) {
     return
   }
   guard !OfflineNetwork.macHasNetwork() else { return }
-  if OfflineNetwork.isInstalled {
-    // With --system-proxy the stand-in carries that setting too: the Mac's own network services,
-    // where SystemProxy puts it, aren't in use while the Mac is on none of them.
-    if OfflineNetwork.up(proxyPort: useSystemProxy ? port : nil), !didAnnounceStandIn {
+  guard OfflineNetwork.isInstalled else {
+    if !didExplainHelper {
+      didExplainHelper = true
+      print("nothering: this Mac has no network of its own, so its apps won't try to connect. Run `nothering --install-helper` once, then start again")
+    }
+    return
+  }
+  // With --system-proxy the stand-in carries that setting too: the Mac's own network services,
+  // where SystemProxy puts it, aren't in use while the Mac is on none of them.
+  if OfflineNetwork.up(proxyPort: useSystemProxy ? port : nil) {
+    if !didAnnounceStandIn {
       didAnnounceStandIn = true
       print("nothering: this Mac has no network of its own, so it is given a stand-in while the iPhone is linked")
     }
   } else if !didExplainHelper {
     didExplainHelper = true
-    print("nothering: this Mac has no network of its own, so its apps won't try to connect. Run `nothering --install-helper` once, then start again")
+    print("nothering: this Mac has no network of its own, and the helper didn't give it a stand-in, so its apps won't try to connect. This says why: sudo -n \(OfflineNetwork.helperPath) up \(getpid())")
   }
 }
 
@@ -133,7 +138,7 @@ func pair() -> String {
   let answer = Answer()
   let answered = DispatchSemaphore(value: 0)
   let done = DispatchSemaphore(value: 0)
-  let pairer = DirectLinkPairer(name: Host.current().localizedName ?? "Mac") { state in
+  let pairer = DirectLinkPairer(name: computerName()) { state in
     switch state {
     case .searching:
       print("nothering: looking for the iPhone to pair with. Open Nothering on it and keep it open")
@@ -153,6 +158,8 @@ func pair() -> String {
   answered.wait()
   // Only the person knows whether it was their iPhone that answered. Another device in range can
   // answer in its place with a code of its own, and would then carry everything this Mac sends.
+  // What was typed before the question was asked is no answer to it.
+  tcflush(STDIN_FILENO, TCIFLUSH)
   print("nothering: an iPhone allowed this Mac. Did yours show \(answer.digits), and did you tap Allow on it? [y/N] ", terminator: "")
   fflush(stdout)
   let reply = readLine()?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
@@ -178,34 +185,65 @@ if via == "direct" {
     print("nothering: paired")
   }
   let linkCode = DirectLinkCode.normalized(pairingCode ?? "")
-  // Kept for the next run, whichever way it came.
-  UserDefaults.standard.set(DirectLinkCode.format(linkCode), forKey: savedCodeKey)
+  // Kept for the next run. A code from pairing, or the one kept before, right away. One that was
+  // typed only once it has connected: a slip of the finger shouldn't replace the code that works.
+  let wasTyped = code != nil
+  if !wasTyped {
+    UserDefaults.standard.set(DirectLinkCode.format(linkCode), forKey: savedCodeKey)
+  }
   let client = DirectLinkClient(code: linkCode)
   client.start()
   if wakesPhone {
     let waker = DirectLinkWaker(code: linkCode)
-    let lock = NSLock()
-    var lastWake = Date.distantPast
+    // Not more often than an attempt takes, however often the link is found down.
+    let shortestWait: TimeInterval = 20
+    /// Touched from the keepalive's queue and the waker's. Under the lock.
+    final class Asking: @unchecked Sendable {
+      let lock = NSLock()
+      var wait: TimeInterval = 0
+      var lastWake = Date.distantPast
+      var lastSaid = ""
+    }
+    let asking = Asking()
+    asking.wait = shortestWait
+    let say: @Sendable (String) -> Void = { message in
+      // Once, not every time the same thing happens again.
+      let isNew = asking.lock.withLock {
+        defer { asking.lastSaid = message }
+        return asking.lastSaid != message
+      }
+      if isNew { print("nothering: \(message)") }
+    }
     let wake = {
-      // Not more often than an attempt takes, however often the link is found down.
-      let isDue = lock.withLock {
-        guard Date().timeIntervalSince(lastWake) >= 20 else { return false }
-        lastWake = Date()
+      let isConnected = client.currentStatus == .connected
+      let isDue = asking.lock.withLock {
+        if isConnected {
+          // The link is there. The next time it is lost, the iPhone is asked at once again.
+          asking.wait = shortestWait
+          asking.lastSaid = ""
+          return false
+        }
+        guard Date().timeIntervalSince(asking.lastWake) >= asking.wait else { return false }
+        asking.lastWake = Date()
         return true
       }
-      guard isDue, client.currentStatus != .connected else { return }
+      guard isDue else { return }
       waker.wake { outcome in
         switch outcome {
-        case .woke: print("nothering: the iPhone is starting its proxy")
-        case .refused: print("nothering: an iPhone with Nothering is in range, but it has another pairing code. If it is yours, run with --pair")
-        case .notFound: print("nothering: iPhone not found over Bluetooth. Is Nothering still open in its app switcher?")
-        case let .unavailable(reason): print("nothering: \(reason)")
+        case .woke:
+          // Heard, and still no link: asking as often won't change that, and each time starts the
+          // iPhone's proxy and its notification over. So every time it waits twice as long.
+          asking.lock.withLock { asking.wait = min(asking.wait * 2, 600) }
+          say("the iPhone is starting its proxy")
+        case .refused: say("an iPhone with Nothering is in range, but it has another pairing code. If it is yours, run with --pair")
+        case .notFound: say("iPhone not found over Bluetooth. Is Nothering still open in its app switcher?")
+        case let .unavailable(reason): say(reason)
         }
       }
     }
     print("nothering: waking the iPhone over Bluetooth")
     wake()
-    wakePhoneAgain = wake
+    wakePhoneIfDown = wake
   }
   print("nothering: looking for the iPhone over Wi-Fi")
   // A woken iPhone needs to be found over Bluetooth and to start its proxy first.
@@ -222,9 +260,12 @@ if via == "direct" {
     }
     // One attempt can pass unheard: an iPhone whose app is in the background answers less often,
     // and the first time macOS asks whether Bluetooth may be used. Not more often than it is due.
-    wakePhoneAgain?()
+    wakePhoneIfDown?()
     usleep(200_000)
     status = client.currentStatus
+  }
+  if wasTyped {
+    UserDefaults.standard.set(DirectLinkCode.format(linkCode), forKey: savedCodeKey)
   }
   // The client keeps the link, and finds the phone again by itself after it was out of range.
   connectUpstream = { try client.connect() }
@@ -321,10 +362,13 @@ keepalive.setEventHandler {
     listenToPhone()
   } catch {
     FileHandle.standardError.write(Data("nothering: keepalive failed: \(error.localizedDescription)\n".utf8))
+    // A link that went without a word leaves the event stream's read waiting for ever, and no new
+    // stream is opened while that one counts as open. Ending it lets the next one be heard.
+    phoneEvents.stop()
     // Without the iPhone the stand-in network leads nowhere, and the Mac shouldn't think otherwise.
     keepMacOnline(isLinked: false)
-    wakePhoneAgain?()
   }
+  wakePhoneIfDown?()
 }
 keepalive.resume()
 

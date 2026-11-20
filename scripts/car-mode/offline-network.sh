@@ -19,9 +19,22 @@ ROUTER=198.18.0.1
 OWNER_FILE=/var/run/nothering-offline-network.owner
 WATCHER_FILE=/var/run/nothering-offline-network.watcher
 
-# Another IPv4 service in the system's network state means the Mac got a real network.
+# The service the Mac is on for IPv4 or IPv6, as the system's network state names it. Empty when
+# it is on none.
+primary_service() {
+  echo "show State:/Network/Global/$1" | scutil | awk '$1 == "PrimaryService" { print $3 }'
+}
+
+# The Mac has a way out of its own: a service other than the stand-in is the one it is on. A
+# service with no router never is, e.g. a tunnel that only takes its own addresses, so a Mac on
+# nothing but those still gets the stand-in. The stand-in has no IPv6, so a service the Mac is on
+# for IPv6 is always another one. OfflineNetwork.macHasNetwork() asks the same.
 other_network() {
-  echo "list State:/Network/Service/[^/]+/IPv4" | scutil | grep "State:/Network/Service/" | grep -v "/$SERVICE/" >/dev/null
+  primary=$(primary_service IPv4)
+  if [ -n "$primary" ] && [ "$primary" != "$SERVICE" ]; then
+    return 0
+  fi
+  [ -n "$(primary_service IPv6)" ]
 }
 
 is_up() {
@@ -34,7 +47,8 @@ remove State:/Network/Service/$SERVICE/IPv4
 remove State:/Network/Service/$SERVICE/DNS
 remove State:/Network/Service/$SERVICE/Proxies
 EOF
-  route -n delete default "$ROUTER" >/dev/null 2>&1
+  # No "route delete default" here: it takes the default route of whatever network the Mac is on
+  # by then, whichever router it names. Destroying the interface takes its own routes with it.
   ifconfig "$NEAR" destroy >/dev/null 2>&1
   ifconfig "$FAR" destroy >/dev/null 2>&1
   rm -f "$OWNER_FILE"
@@ -42,8 +56,19 @@ EOF
 
 down() {
   if [ -f "$WATCHER_FILE" ]; then
-    kill "$(cat "$WATCHER_FILE")" >/dev/null 2>&1
+    watcher=$(cat "$WATCHER_FILE")
     rm -f "$WATCHER_FILE"
+    # A watcher that was ended any other way leaves its number behind, and by now the number may
+    # be any process's. Only this script is ended. Not with a signal it could be ignoring: what
+    # started it may ignore the usual one, and a shell can't take that back.
+    case "$watcher" in
+      '' | *[!0-9]*) ;;
+      *)
+        case "$(ps -ww -o command= -p "$watcher" 2>/dev/null)" in
+          *"${0##*/}"*) kill -KILL "$watcher" >/dev/null 2>&1 ;;
+        esac
+        ;;
+    esac
   fi
   teardown
 }

@@ -65,7 +65,10 @@ struct ContentView: View {
         }
 
         Section {
-          UsageView(usage: controller.usage, sessionBytes: controller.sessionUsage, isRunning: controller.isRunning)
+          UsageView(
+            usage: controller.usage, sessionBytes: controller.sessionUsage,
+            isCurrentSession: controller.isRunning && !controller.isSessionNew
+          )
           LabeledContent("Today", value: formatBytes(controller.usage.today()))
           LabeledContent("This month", value: formatBytes(controller.usage.thisMonth()))
           LabeledContent("All time", value: formatBytes(controller.usage.allTime))
@@ -94,7 +97,7 @@ struct ContentView: View {
           }
           if controller.hasPairedMac {
             Button(controller.isPairingOpen ? "Waiting for the Mac…" : "Pair Another Mac") {
-              controller.pairAnotherMac()
+              Task { await controller.pairAnotherMac() }
             }
             .disabled(controller.isPairingOpen)
           }
@@ -173,11 +176,11 @@ struct ContentView: View {
       }
       .task {
         if scenePhase == .active { controller.cameToFront() }
-        if CommandLine.arguments.contains("--autostart") || controller.shouldRestore, !controller.isRunning {
-          await controller.start()
-        } else if startsWhenOpened {
-          await controller.startBecauseOpened()
-        }
+        // iOS builds this view too when it launches the app in the background for the Mac's
+        // Bluetooth wake. That is no opening: the wake starts the proxy itself, once the Mac has
+        // shown that it knows the pairing code.
+        guard UIApplication.shared.applicationState != .background else { return }
+        await opened()
       }
       .onChange(of: focusSound) { _, sound in
         controller.setFocusSound(sound)
@@ -186,9 +189,7 @@ struct ContentView: View {
         if phase == .active {
           controller.resumeKeeper()
           controller.cameToFront()
-          if startsWhenOpened {
-            Task { await controller.startBecauseOpened() }
-          }
+          Task { await opened() }
         } else if phase == .background {
           controller.didEnterBackground()
           showsPairingCode = false
@@ -207,6 +208,16 @@ struct ContentView: View {
       Button("Don't Allow", role: .cancel) { controller.answerPairing(false, for: prompt.id) }
     } message: { prompt in
       Text("“\(prompt.name)” wants to use this iPhone's connection over Wi-Fi. Allow it only if your Mac shows \(prompt.digits).")
+    }
+  }
+
+  /// The app was opened, or came to the front. A proxy the person had left on comes back after
+  /// iOS ended the app, and otherwise opening is what starts it.
+  private func opened() async {
+    if CommandLine.arguments.contains("--autostart") || controller.shouldRestore, !controller.isRunning {
+      await controller.start()
+    } else if startsWhenOpened {
+      await controller.startBecauseOpened()
     }
   }
 }
@@ -445,14 +456,16 @@ private struct ThroughputView: View {
 private struct UsageView: View {
   let usage: UsageLog
   let sessionBytes: UInt64
-  let isRunning: Bool
+  /// Whether the figure is the running session's. Until that one has carried something, it is
+  /// still the one before.
+  let isCurrentSession: Bool
 
   private static let dayCount = 30
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       VStack(alignment: .leading, spacing: 2) {
-        Text(isRunning ? "Hotspot data saved this session" : "Hotspot data saved last session")
+        Text(isCurrentSession ? "Hotspot data saved this session" : "Hotspot data saved last session")
           .font(.caption.weight(.medium))
           .foregroundStyle(.green)
         Text(formatBytes(sessionBytes))

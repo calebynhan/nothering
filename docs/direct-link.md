@@ -74,8 +74,9 @@ by itself. Setting it up takes a cable and about ten minutes, once.
 4. **Pair**, once. Open Nothering Direct on the iPhone and leave it open. Allow local network
    access and Bluetooth when it asks. On the Mac, double-click **Nothering Direct** on the Desktop.
    The Mac prints a number, the iPhone asks "Allow this Mac?" with the same number: tap **Allow**,
-   then answer **y** on the Mac. macOS asks whether Terminal may find devices on the local network
-   and use Bluetooth: allow both.
+   then answer **y** on the Mac. macOS asks whether Terminal may use Bluetooth: allow it. A
+   terminal app other than Apple's may also be asked about devices on the local network: allow
+   that too.
 
 After that it is one double-click on the Mac. The iPhone's app is started over Bluetooth, the Mac
 connects, and the Mac's apps go through the iPhone until the window is closed.
@@ -107,8 +108,8 @@ Nothing here has run on an iPhone yet. What has been checked, and how far that g
 
 | | Checked | How |
 |---|---|---|
-| Stream multiplexer, pairing code, pairing exchange, the wake's challenge and answer | tested | 57 tests on Linux. The cryptography ran with swift-crypto, which has CryptoKit's API |
-| Car mode's helper, watcher and installers | tested | 94 checks against stand-ins for `ifconfig`, `scutil`, `route` and the rest |
+| Stream multiplexer, pairing code, pairing exchange, the wake's challenge and answer, the helper's install commands | tested | 59 tests on Linux. The cryptography ran with swift-crypto, which has CryptoKit's API |
+| Car mode's helper, watcher and installers, and the Mac installer with its launcher | tested | 109 checks against stand-ins for `ifconfig`, `scutil`, `sudo` and the rest |
 | Everything that uses Network, Security and CoreBluetooth | type-checked | against stand-ins for those frameworks on Linux, and read against Apple's real headers |
 | The same, compiled and run on a Mac | see the newest [build](../../../actions) | GitHub builds every push on a Mac, runs the tests there, and connects the two sides of the link to each other over loopback |
 | What macOS makes of the stand-in network | see the newest build's probe | a job takes its Mac off the network for a minute and writes down what it sees |
@@ -152,7 +153,8 @@ doesn't leave you without a way to look things up. `nothering` below is `~/.loca
    straight back, and repeat it again. Away for longer than about 45 seconds, the iPhone's proxy
    stops for want of a Mac: the command then says its keepalive failed until the proxy is started
    again, which the wake of step 8 does by itself.
-6. Every app. Stop the command with Control-C and start it as the Desktop launcher does:
+6. Every app. Stop the command with Control-C and start it again with the system's proxy setting,
+   which the Desktop launcher also uses:
 
    ```sh
    nothering --via direct --system-proxy
@@ -196,6 +198,12 @@ In the car it is then the double-click of step 8, and nothing on the iPhone.
   scutil --proxy
   ```
 
+  The helper goes by the network service this names, which should be `NOTHERING-OFFLINE`:
+
+  ```sh
+  echo "show State:/Network/Global/IPv4" | scutil
+  ```
+
   ```sh
   sudo /Library/PrivilegedHelperTools/nothering-offline-network status
   ```
@@ -236,9 +244,11 @@ log stream --predicate 'subsystem == "app.nothering"'
 - The wake doesn't reach an app that was swiped away in the app switcher, and may not after the
   iPhone restarted until the app was opened once.
 - While the Mac wants the iPhone and isn't connected, it scans for it over Bluetooth about every
-  20 seconds.
-- The helper counts any other network service as the Mac having a network, also one that leads
-  nowhere, like a Wi-Fi network that hands out no address.
+  20 seconds. Once the iPhone has answered and still no link came of it, each wait is twice the
+  one before, up to ten minutes, until the link is there again.
+- The helper goes by the network the Mac says it is on. One that leads nowhere but has a router,
+  like Wi-Fi with no internet behind it, counts as the Mac's own, and no stand-in comes up. With
+  `--system-proxy` the Mac's apps go through the iPhone all the same.
 - With `--system-proxy` and no extension, apps that ignore the system's proxy setting stay
   offline, and nothing on the Mac can look up a name by itself.
 

@@ -24,8 +24,11 @@ final class ProxyController {
   private(set) var macLinks: Set<ProxyServer.Link> = []
   /// Lifetime traffic, kept across launches.
   private(set) var usage = ProxyController.loadUsage()
-  /// Bytes relayed since the proxy last started, kept across launches so the last session stays visible.
+  /// Bytes relayed in the last session that carried any, kept across launches so it stays visible.
   private(set) var sessionUsage = UInt64(max(0, UserDefaults.standard.integer(forKey: ProxyController.sessionUsageKey)))
+  /// The proxy runs and has carried nothing yet, so `sessionUsage` is still the session before.
+  /// Opening the app starts the proxy, and would otherwise wipe the very figure it was opened for.
+  private(set) var isSessionNew = false
   /// The pairing code for the direct Wi-Fi link. Made once and kept, so the Mac is paired once,
   /// until the person asks for a new one.
   private(set) var directLinkCode = ProxyController.loadDirectLinkCode()
@@ -50,7 +53,13 @@ final class ProxyController {
   @ObservationIgnored private var wasStartedByOpening = false
   /// A paired Mac started the proxy over Bluetooth, with the app in the background.
   @ObservationIgnored private var wasStartedByWake = false
+  /// The start under way, for whoever asks for one meanwhile.
+  @ObservationIgnored private var starting: Task<Void, Never>?
+  /// What the running proxy was started for.
+  @ObservationIgnored private var startReason = StartReason.hand
   @ObservationIgnored private var didAskToOpen = false
+  /// When the person was last asked to open the app, see `askToOpenAgainAfter`.
+  @ObservationIgnored private var askedToOpenAt = Date.distantPast
   @ObservationIgnored private var hadMacLink = false
   /// Lets a paired Mac start the proxy over Bluetooth, see `DirectLinkWake`.
   @ObservationIgnored private var wakeBeacon: DirectLinkWakeBeacon?
@@ -84,6 +93,9 @@ final class ProxyController {
   private static let wokenWithoutMacTimeout: TimeInterval = 2 * 60
   /// How long after a wake the Mac may take to connect before the person is asked to open the app.
   private static let askToOpenAfter: TimeInterval = 20
+  /// How long the person isn't asked again. The Mac keeps waking the iPhone for as long as it is
+  /// switched on, and every notification rings.
+  private static let askToOpenAgainAfter: TimeInterval = 10 * 60
   private static let askToOpenIdentifier = "wake"
 
   private var server: ProxyServer?
@@ -128,6 +140,12 @@ final class ProxyController {
   }
 
   private func record(up: UInt64, down: UInt64) {
+    guard up > 0 || down > 0 else { return }
+    if isSessionNew {
+      // The session's first traffic is where its figure starts over.
+      isSessionNew = false
+      sessionUsage = 0
+    }
     usage.record(up: up, down: down)
     sessionUsage &+= up &+ down
   }
@@ -165,6 +183,7 @@ final class ProxyController {
   /// certain after Bluetooth was off, and when a change in Settings shows.
   func cameToFront() {
     isInFront = true
+    waitForMacIsOver()
     updatePairing()
     #if !targetEnvironment(simulator)
       wakeBeacon?.refresh()
@@ -183,7 +202,13 @@ final class ProxyController {
   }
 
   /// The person wants to pair one more Mac.
-  func pairAnotherMac() {
+  func pairAnotherMac() async {
+    // Pairing is served by the proxy, so it has to run. Like one that opening the app started, it
+    // stops by itself if no Mac comes.
+    if !isRunning {
+      await start(.opened)
+    }
+    guard isRunning else { return }
     let until = Date.now.addingTimeInterval(Self.pairingWindow)
     pairingOpenUntil = until
     // Anew: what paired the last Mac lets nobody ask again.
@@ -200,13 +225,15 @@ final class ProxyController {
   /// Replaces the pairing code. Macs paired with the old one are let go, and have to pair again.
   func newPairingCode() async {
     let wasRunning = isRunning
+    let reason = startReason
     if wasRunning { stop() }
     directLinkCode = DirectLinkCode.generate()
     UserDefaults.standard.set(directLinkCode, forKey: Self.directLinkCodeKey)
     wakeBeacon?.use(code: directLinkCode)
     hasPairedMac = false
     pairingOpenUntil = .distantPast
-    if wasRunning { await start() }
+    // As what it was: one that opening the app started keeps its time limit.
+    if wasRunning { await start(reason) }
   }
 
   func setFocusSound(_ sound: FocusSound) {
@@ -240,8 +267,7 @@ final class ProxyController {
   /// Opening the app is asking for the proxy, so with "Start when opened" there is nothing to tap.
   func startBecauseOpened() async {
     guard !isRunning, !wasStoppedByHand else { return }
-    await start()
-    wasStartedByOpening = isRunning
+    await start(.opened)
   }
 
   func didEnterBackground() {
@@ -254,17 +280,25 @@ final class ProxyController {
   /// A paired Mac asked for the proxy over Bluetooth, so nobody has to pick up the iPhone.
   func startBecauseWoken() async {
     guard !isRunning else { return }
-    await start()
-    guard isRunning else {
+    await start(.woken)
+    if !isRunning {
       // iOS didn't let the proxy start in the background. A tap on the notification opens the
       // app, which starts it.
-      return askToOpen()
+      askToOpen()
     }
-    wasStartedByWake = true
+  }
+
+  /// The person opened the app, or the Mac got through: the notification that asked for the app
+  /// to be opened has nothing left to say, and the next wait may ask again.
+  private func waitForMacIsOver() {
+    askedToOpenAt = .distantPast
+    UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [Self.askToOpenIdentifier])
   }
 
   /// The fallback when a wake isn't enough. Shows only if notifications are allowed.
   private func askToOpen() {
+    guard Date.now.timeIntervalSince(askedToOpenAt) > Self.askToOpenAgainAfter else { return }
+    askedToOpenAt = .now
     let content = UNMutableNotificationContent()
     content.title = String(localized: "Your Mac is waiting")
     content.body = String(localized: "Open Nothering to let your Mac use this iPhone's connection.")
@@ -291,16 +325,46 @@ final class ProxyController {
 
   private func showPairing(_ request: DirectLinkPairingRequest?) {
     guard let request else {
-      // The Mac gave up, so there is nothing left to answer.
+      // The request is over: the Mac gave up, or it has its answer. After a yes this is where
+      // pairing is taken down, now that the code has gone out. Left up, it would keep the radio
+      // busy announcing what nobody may ask for.
       pairingAnswer = nil
       pairingPrompt = nil
+      updatePairing()
       return
     }
     pairingAnswer = request.answer
     pairingPrompt = PairingPrompt(name: request.name, digits: request.digits)
   }
 
-  func start() async {
+  /// What a start was for. It decides how long the proxy waits for a Mac, and whether it comes
+  /// back after iOS ended the app.
+  enum StartReason {
+    /// A tap on Start.
+    case hand
+    /// The app was opened, with "Start when opened" on.
+    case opened
+    /// A paired Mac asked over Bluetooth.
+    case woken
+  }
+
+  /// Starts the proxy. Asked again while a start is under way, it waits for that one: the app's
+  /// first moments ask twice, and a second start would fail on the port the first one holds, and
+  /// take the first one's keeper down with it.
+  func start(_ reason: StartReason = .hand) async {
+    if let starting {
+      return await starting.value
+    }
+    guard !isRunning else { return }
+    let task = Task {
+      await startNow(reason)
+      starting = nil
+    }
+    starting = task
+    await task.value
+  }
+
+  private func startNow(_ reason: StartReason) async {
     lastError = nil
     #if targetEnvironment(simulator)
       // The simulator has no cellular, and shares the Mac's ports with the menu bar app's forwarder.
@@ -328,18 +392,21 @@ final class ProxyController {
     samples = []
     macLinks = []
     linkSeenAt = [:]
-    sessionUsage = 0
-    wasStartedByOpening = false
-    wasStartedByWake = false
+    isSessionNew = true
+    startReason = reason
+    wasStartedByOpening = reason == .opened
+    wasStartedByWake = reason == .woken
     didAskToOpen = false
     hadMacLink = false
-    UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [Self.askToOpenIdentifier])
     saveUsage()
     let startedAt = Date.now
     self.startedAt = startedAt
     lastSampledAt = .now
     isRunning = true
-    UserDefaults.standard.set(true, forKey: Self.wasRunningKey)
+    // Only a proxy the person started comes back as one after iOS ended the app. One that opening
+    // or a wake started would come back with no time limit, and play silence until the battery
+    // is empty.
+    UserDefaults.standard.set(reason == .hand, forKey: Self.wasRunningKey)
     let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
       MainActor.assumeIsolated { self?.refreshStats() }
     }
@@ -361,6 +428,7 @@ final class ProxyController {
     startedAt = nil
     directLinkProblem = nil
     answerPairing(false)
+    isSessionNew = false
     isRunning = false
     UserDefaults.standard.set(false, forKey: Self.wasRunningKey)
   }
@@ -428,7 +496,10 @@ final class ProxyController {
     macLinks = Set(linkSeenAt.filter {
       now - $0.value < ($0.key == .direct ? Self.directLinkTimeout : Self.linkTimeout)
     }.keys)
-    hadMacLink = hadMacLink || !macLinks.isEmpty
+    if !hadMacLink, !macLinks.isEmpty {
+      hadMacLink = true
+      waitForMacIsOver()
+    }
     // Keeping the silent audio running with no client drains the battery, so turn off once the last Mac leaves.
     if hadLinks, macLinks.isEmpty {
       stop()

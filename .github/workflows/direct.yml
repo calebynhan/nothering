@@ -28,7 +28,7 @@ jobs:
   build:
     name: Build and test
     runs-on: macos-26
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       # Through the environment, not into the script text, since they end up in commands.
       INPUT_VERSION: ${{ inputs.version }}

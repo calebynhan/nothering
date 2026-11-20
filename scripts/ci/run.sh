@@ -4,6 +4,8 @@
 # Every step runs even after one failed, so one run shows every error. Each step's whole output is
 # out/logs/<step>.log, its errors are out/logs/<step>.errors.txt, and out/summary.txt has one line
 # per step. With the iPhone app and the Mac tool built, out/release/ holds what a release carries.
+# The builds come first and the tests last, each with a time limit: a test that waits for ever
+# then costs its own step, and not the builds or the job's whole time.
 set -u
 version=${1:-}
 root=$(cd "$(dirname "$0")/../.." && pwd)
@@ -69,11 +71,37 @@ xcode() {
   xcodebuild -workspace Nothering.xcworkspace -derivedDataPath "$derived" "$@" "${flags[@]}"
 }
 
+# limited <seconds> <command...>: the command, ended when it takes longer than that. Its status,
+# or 124 when it had to be ended.
+limited() {
+  local limit=$1 finished pid waited=0 status
+  shift
+  finished=$(mktemp)
+  ("$@"; echo $? > "$finished") &
+  pid=$!
+  while [[ ! -s $finished ]]; do
+    if ((waited >= limit)); then
+      echo "error: still running after $limit s, ended"
+      # What runs is one below the number at hand. And the program xcodebuild runs the tests in
+      # outlives it: a test that hangs never ends by itself.
+      pkill -TERM -P "$pid" 2> /dev/null
+      kill "$pid" 2> /dev/null
+      pkill -KILL -x xctest 2> /dev/null
+      echo 124 > "$finished"
+      break
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  wait "$pid" 2> /dev/null
+  status=$(< "$finished")
+  rm -f "$finished"
+  return "${status:-1}"
+}
+
 step car-mode-scripts sh scripts/car-mode/test.sh
 step direct-scripts sh scripts/direct/test.sh
 if step generate env TUIST_BUILD_NUMBER="$build_number" tuist generate --no-open; then
-  step test-ProxyCore xcode test -scheme ProxyCore -configuration Debug -destination platform=macOS "${unsigned[@]}"
-  step test-PhoneLink xcode test -scheme PhoneLink -configuration Debug -destination platform=macOS "${unsigned[@]}"
   # A bundle ID and name of its own, so it installs next to the App Store's Nothering.
   step build-iphone-app xcode build -scheme NotheringiOS -configuration Production \
     -destination generic/platform=iOS "${unsigned[@]}" BUNDLE_ID_PREFIX=app.nothering.direct
@@ -91,6 +119,8 @@ if step generate env TUIST_BUILD_NUMBER="$build_number" tuist generate --no-open
   else
     echo "package: skipped, it needs the iPhone app and the Mac tool" | tee -a "$out/summary.txt"
   fi
+  step test-ProxyCore limited 900 xcode test -scheme ProxyCore -configuration Debug -destination platform=macOS "${unsigned[@]}"
+  step test-PhoneLink limited 600 xcode test -scheme PhoneLink -configuration Debug -destination platform=macOS "${unsigned[@]}"
 fi
 
 if [[ -n $failed ]]; then

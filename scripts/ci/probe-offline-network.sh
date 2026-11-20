@@ -34,9 +34,29 @@ count() {
 }
 
 # The probe that asks macOS itself. Built now: there is no network to fetch anything with later.
+# With an Info.plist inside it that allows plain http: macOS refuses that to a program by default,
+# before any proxy is asked, and the pages fetched below are plain http so the stand-in proxy can
+# answer them.
 probe=$out/reachability
-if ! swiftc -O "$root/scripts/ci/reachability.swift" -o "$probe" >> "$log" 2>&1; then
+cat > "$out/reachability.plist" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>app.nothering.probe</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+</dict>
+</plist>
+EOF
+if ! swiftc -O "$root/scripts/ci/reachability.swift" -o "$probe" \
+  -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker "$out/reachability.plist" >> "$log" 2>&1; then
   say "reachability.swift didn't compile, going on with the command-line tools only"
+  tail -20 "$log"
   probe=
 fi
 
@@ -51,6 +71,9 @@ snapshot() {
     echo "--- scutil --dns (top)"; scutil --dns 2>&1 | head -30
     echo "--- scutil --proxy"; scutil --proxy 2>&1
     echo "--- State:/Network/Service/*/IPv4"; echo "list State:/Network/Service/[^/]+/IPv4" | scutil 2>&1
+    # What the helper goes by: the service the Mac is on.
+    echo "--- State:/Network/Global/IPv4"; echo "show State:/Network/Global/IPv4" | scutil 2>&1
+    echo "--- State:/Network/Global/IPv6"; echo "show State:/Network/Global/IPv6" | scutil 2>&1
     echo "--- ifconfig feth5478"; ifconfig feth5478 2>&1
     if [[ -n $probe ]]; then
       echo "--- what macOS tells apps"; "$probe" 2>&1
@@ -106,11 +129,11 @@ say "helper up with no network: exit $?"
 sleep 4
 snapshot "the network taken away, stand-in up"
 say "default route with the stand-in: $(default_interface)"
+say "the service the Mac is on with the stand-in: $(echo "show State:/Network/Global/IPv4" | scutil | awk '$1 == "PrimaryService" { print $3 }')"
 say "DNS servers with the stand-in: $(scutil --dns 2>/dev/null | awk '/nameserver\[/ { print $3 }' | sort -u | tr '\n' ' ')"
 say "with the stand-in, what macOS tells apps: $(told_apps)"
 # What leaves on the stand-in while programs try: they should be asking for its router.
 sudo tcpdump -i feth5478 -n -l > "$out/wire.txt" 2>> "$log" &
-capture=$!
 sleep 1
 curl -m 3 -sS -o /dev/null http://192.0.2.10/ >> "$log" 2>&1
 say "with the stand-in, connecting to an internet address: curl exit $? (7 = didn't even try, 28 = tried and timed out)"
@@ -123,7 +146,8 @@ lookup=$!
 sleep 3
 kill "$lookup" > /dev/null 2>&1
 sudo arp -d 198.18.0.1 ifscope feth5478 >> "$log" 2>&1
-sudo kill "$capture" > /dev/null 2>&1
+# By name: the number at hand is sudo's, which doesn't always pass a signal on.
+sudo pkill -x tcpdump > /dev/null 2>&1
 sleep 1
 say "on the stand-in's wire: $(count 'who-has 198.18.0.1' "$out/wire.txt") questions for its router, $(count '> 198.18.0.1.53:' "$out/wire.txt") lookups sent to its DNS server"
 if [[ -n $probe ]]; then

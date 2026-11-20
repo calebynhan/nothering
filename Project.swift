@@ -51,10 +51,13 @@ let localNetworkUsage: [String: Plist.Value] = [
   "NSBonjourServices": directLinkService,
 ]
 
+// On the Mac the Bluetooth wake (see DirectLinkWake) takes two more things than these words: with the hardened
+// runtime a program may only use Bluetooth with the com.apple.security.device.bluetooth entitlement, which both
+// the app's and the tool's entitlements carry, and a command-line tool has no bundle, so its Info.plist only
+// exists if it is put inside the program, see CREATE_INFOPLIST_SECTION_IN_BINARY below.
 let macLocalNetworkUsage: [String: Plist.Value] = [
   "NSLocalNetworkUsageDescription": "Nothering finds your iPhone over Wi-Fi when you connect it without a cable or a hotspot.",
   "NSBonjourServices": directLinkService,
-  // The Bluetooth wake, see DirectLinkWake.
   "NSBluetoothAlwaysUsageDescription": "Nothering asks your iPhone over Bluetooth to start its proxy, so you don't have to pick it up.",
 ]
 
@@ -137,8 +140,9 @@ let project = Project(
       deploymentTargets: .macOS("15.0"),
       infoPlist: .extendingDefault(with: version.merging(macLocalNetworkUsage) { $1 }),
       sources: ["Mac/Sources/**"],
+      entitlements: "Mac/CLI.entitlements",
       dependencies: [.target(name: "ProxyCore"), .target(name: "PhoneLink")],
-      settings: .settings(base: hardenedRuntime)
+      settings: .settings(base: hardenedRuntime.merging(["CREATE_INFOPLIST_SECTION_IN_BINARY": "YES"]) { $1 })
     ),
     .target(
       name: "NotheringMenuBar",

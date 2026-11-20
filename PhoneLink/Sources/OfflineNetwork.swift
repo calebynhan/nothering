@@ -17,29 +17,28 @@ public enum OfflineNetwork {
   public static let helperPath = "/Library/PrivilegedHelperTools/nothering-offline-network"
   static let sudoersPath = "/etc/sudoers.d/nothering"
   static let sudoersRule = "%admin ALL=(root) NOPASSWD: \(helperPath)"
-  /// The helper's interfaces are named with this, which is how its default route is told apart.
-  static let interfacePrefix = "feth"
+  /// The helper's network, as the system's network state names it, and the interface it is on.
+  static let serviceID = "NOTHERING-OFFLINE"
+  static let interfaceName = "feth5478"
 
   public static var isInstalled: Bool {
     FileManager.default.isExecutableFile(atPath: helperPath) && FileManager.default.fileExists(atPath: sudoersPath)
   }
 
-  /// Whether the Mac has a way out of its own: a default route that isn't the helper's.
+  /// Whether the Mac has a way out of its own: a network service other than the helper's is the
+  /// one it is on. A service with no router never is, e.g. a tunnel that only takes its own
+  /// addresses. The helper asks the same, so the two never disagree about bringing it up.
   public static func macHasNetwork() -> Bool {
-    if let interface = defaultRouteInterface(family: "-inet"), !interface.hasPrefix(interfacePrefix) {
+    if let primary = primaryService(family: "IPv4"), primary != serviceID {
       return true
     }
-    // Tunnels and the device-to-device Wi-Fi interfaces have IPv6 routes of their own on any Mac.
-    if let interface = defaultRouteInterface(family: "-inet6"),
-       !["utun", "awdl", "llw", interfacePrefix].contains(where: interface.hasPrefix) {
-      return true
-    }
-    return false
+    // The helper's network has no IPv6.
+    return primaryService(family: "IPv6") != nil
   }
 
-  /// Whether the helper's network is what the Mac is on.
+  /// Whether the helper's network is there.
   public static func isUp() -> Bool {
-    defaultRouteInterface(family: "-inet")?.hasPrefix(interfacePrefix) == true
+    if_nametoindex(interfaceName) != 0
   }
 
   /// Brings the stand-in network up for as long as process `pid` lives. Returns whether it is up.
@@ -68,44 +67,63 @@ public enum OfflineNetwork {
     _ = try? run("/usr/bin/sudo", ["-n", helperPath, "down"])
   }
 
-  /// Writes the helper and its sudo rule to temporary files and returns the shell commands that
-  /// put them in place, to be run as root.
-  public static func installCommands() throws -> String {
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("nothering-helper-\(UUID().uuidString)")
-    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    let scriptFile = directory.appendingPathComponent("offline-network.sh")
-    let rulesFile = directory.appendingPathComponent("sudoers")
-    try script.write(to: scriptFile, atomically: true, encoding: .utf8)
-    try "\(sudoersRule)\n".write(to: rulesFile, atomically: true, encoding: .utf8)
-    return [
-      "mkdir -p /Library/PrivilegedHelperTools",
-      "install -o root -g wheel -m 755 '\(scriptFile.path)' '\(helperPath)'",
-      // A rule that doesn't parse would lock sudo up, so it is checked before it goes in.
-      "visudo -cf '\(rulesFile.path)'",
-      "install -o root -g wheel -m 440 '\(rulesFile.path)' '\(sudoersPath)'",
-    ].joined(separator: " && ")
-  }
+  /// The line a here-document with the helper in it ends on. Not a line of the helper.
+  static let scriptEnd = "NOTHERING_HELPER_END"
+
+  /// The shell commands that put the helper and its sudo rule in place, to be run as root.
+  ///
+  /// Both travel inside the commands. Root must not install what it reads from a place the
+  /// person's other programs can write to while the password is being typed, least of all a
+  /// script that then runs as root with no password. So nothing is read from a file that isn't
+  /// root's own: each is first written where only root can write, and moved into place from there.
+  public static let installCommands = """
+    set -e
+    umask 022
+    mkdir -p /Library/PrivilegedHelperTools
+    cat > '\(helperPath).new' <<'\(scriptEnd)'
+    \(script)
+    \(scriptEnd)
+    chown root:wheel '\(helperPath).new'
+    chmod 755 '\(helperPath).new'
+    mv -f '\(helperPath).new' '\(helperPath)'
+    printf '%s\\n' '\(sudoersRule)' > '\(helperPath).rule'
+    # A rule that doesn't parse would lock sudo up, so it is checked before it goes in.
+    visudo -cf '\(helperPath).rule'
+    chown root:wheel '\(helperPath).rule'
+    chmod 440 '\(helperPath).rule'
+    mv -f '\(helperPath).rule' '\(sudoersPath)'
+    """
 
   /// Takes the network down and removes what `installCommands` put in place. To be run as root.
   public static let removeCommands = "'\(helperPath)' down; rm -f '\(sudoersPath)' '\(helperPath)'"
 
   /// Installs the helper from an app, with the system's dialog for an administrator's password.
   public static func installWithPasswordDialog() throws {
-    let commands = try installCommands()
-    try run("/usr/bin/osascript", ["-e", "do shell script \"\(commands)\" with administrator privileges"])
+    // Handed over as an argument, so nothing in the commands has to be quoted for AppleScript.
+    try run("/usr/bin/osascript", [
+      "-e", "on run argv",
+      "-e", "do shell script (item 1 of argv) with administrator privileges",
+      "-e", "end run",
+      installCommands,
+    ])
   }
 
-  static func defaultRouteInterface(family: String) -> String? {
-    guard let output = try? run("/sbin/route", ["-n", "get", family, "default"]) else { return nil }
-    return interface(inRouteOutput: output)
+  static func primaryService(family: String) -> String? {
+    let question = "echo show State:/Network/Global/\(family) | /usr/sbin/scutil"
+    guard let answer = try? run("/bin/sh", ["-c", question]) else { return nil }
+    return primaryService(inScutilOutput: answer)
   }
 
-  /// The interface a `route get` answer names, or `nil` when it found no route.
-  static func interface(inRouteOutput output: String) -> String? {
-    output.split(separator: "\n")
-      .first { $0.contains("interface:") }?
-      .split(separator: " ").last
-      .map(String.init)
+  /// The service a `show State:/Network/Global/IPv4` answer names as the one the Mac is on, or
+  /// `nil` when it is on none.
+  static func primaryService(inScutilOutput output: String) -> String? {
+    for line in output.split(separator: "\n") {
+      let words = line.split(separator: " ")
+      if words.count == 3, words[0] == "PrimaryService", words[1] == ":" {
+        return String(words[2])
+      }
+    }
+    return nil
   }
 
   /// The helper. Plain `sh`, with a fixed PATH and no input but its arguments, because it runs as
@@ -132,9 +150,22 @@ public enum OfflineNetwork {
     OWNER_FILE=/var/run/nothering-offline-network.owner
     WATCHER_FILE=/var/run/nothering-offline-network.watcher
 
-    # Another IPv4 service in the system's network state means the Mac got a real network.
+    # The service the Mac is on for IPv4 or IPv6, as the system's network state names it. Empty when
+    # it is on none.
+    primary_service() {
+      echo "show State:/Network/Global/$1" | scutil | awk '$1 == "PrimaryService" { print $3 }'
+    }
+
+    # The Mac has a way out of its own: a service other than the stand-in is the one it is on. A
+    # service with no router never is, e.g. a tunnel that only takes its own addresses, so a Mac on
+    # nothing but those still gets the stand-in. The stand-in has no IPv6, so a service the Mac is on
+    # for IPv6 is always another one. OfflineNetwork.macHasNetwork() asks the same.
     other_network() {
-      echo "list State:/Network/Service/[^/]+/IPv4" | scutil | grep "State:/Network/Service/" | grep -v "/$SERVICE/" >/dev/null
+      primary=$(primary_service IPv4)
+      if [ -n "$primary" ] && [ "$primary" != "$SERVICE" ]; then
+        return 0
+      fi
+      [ -n "$(primary_service IPv6)" ]
     }
 
     is_up() {
@@ -147,7 +178,8 @@ public enum OfflineNetwork {
     remove State:/Network/Service/$SERVICE/DNS
     remove State:/Network/Service/$SERVICE/Proxies
     EOF
-      route -n delete default "$ROUTER" >/dev/null 2>&1
+      # No "route delete default" here: it takes the default route of whatever network the Mac is on
+      # by then, whichever router it names. Destroying the interface takes its own routes with it.
       ifconfig "$NEAR" destroy >/dev/null 2>&1
       ifconfig "$FAR" destroy >/dev/null 2>&1
       rm -f "$OWNER_FILE"
@@ -155,8 +187,19 @@ public enum OfflineNetwork {
 
     down() {
       if [ -f "$WATCHER_FILE" ]; then
-        kill "$(cat "$WATCHER_FILE")" >/dev/null 2>&1
+        watcher=$(cat "$WATCHER_FILE")
         rm -f "$WATCHER_FILE"
+        # A watcher that was ended any other way leaves its number behind, and by now the number may
+        # be any process's. Only this script is ended. Not with a signal it could be ignoring: what
+        # started it may ignore the usual one, and a shell can't take that back.
+        case "$watcher" in
+          '' | *[!0-9]*) ;;
+          *)
+            case "$(ps -ww -o command= -p "$watcher" 2>/dev/null)" in
+              *"${0##*/}"*) kill -KILL "$watcher" >/dev/null 2>&1 ;;
+            esac
+            ;;
+        esac
       fi
       teardown
     }

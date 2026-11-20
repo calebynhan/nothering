@@ -49,6 +49,13 @@ cat > "$bin/xattr" <<'EOF'
 exit 1
 EOF
 
+# Only asked for the password here, never to run anything.
+cat > "$bin/sudo" <<'EOF'
+#!/bin/sh
+echo "sudo $*" >> "$FAKE_LOG"
+[ "$*" = "-v" ]
+EOF
+
 # Wi-Fi points at the forwarder, the wired service at another proxy on the same port, and the
 # rest at nothing.
 cat > "$bin/networksetup" <<'EOF'
@@ -88,6 +95,7 @@ check "fetches the tool from the repository's newest release" 'grep -q "^curl .*
 check "the tool is in place and can be run" '[ -x "$tool" ] && [ ! -e "$tool.new" ]'
 check "the tool was tried before it replaced anything" 'grep -n "^tool " "$FAKE_LOG" | head -1 | grep -q -- "--help"'
 check "the helper is installed with it" 'grep -qx "tool --install-helper" "$FAKE_LOG"'
+check "the password is asked for by the installer, before the tool needs it" 'grep -n "^sudo -v\$\|^tool --install-helper\$" "$FAKE_LOG" | head -1 | grep -q "sudo -v"'
 check "the launcher is on the Desktop, can be run, and parses" '[ -x "$launcher" ] && sh -n "$launcher"'
 
 echo "The installer, when the tool that was fetched doesn't run"

@@ -17,6 +17,8 @@ final class DirectLinkListener {
 
   private let code: String
   private let queue: DispatchQueue
+  /// Whether the service is announced at all, see `ProxyServer.Configuration.announcesDirectLink`.
+  private let announces: Bool
   private let onStream: (MuxStream) -> Void
   private let logger = Logger(subsystem: "app.nothering", category: "direct")
   private var listener: NWListener?
@@ -30,16 +32,19 @@ final class DirectLinkListener {
   /// Why the Mac can't find the phone, e.g. Local Network access is off. `nil` while it can.
   private(set) var problem: String?
 
-  init(code: String, queue: DispatchQueue, onStream: @escaping (MuxStream) -> Void) throws {
+  init(code: String, queue: DispatchQueue, announces: Bool = true, onStream: @escaping (MuxStream) -> Void) throws {
     self.code = code
     self.queue = queue
+    self.announces = announces
     self.onStream = onStream
     try listen()
   }
 
   /// Where it listens, once it does. The Mac finds it by its Bonjour service, so only tests ask.
   var port: UInt16? {
-    listener?.port?.rawValue
+    // A listener that isn't ready yet says 0, not nothing.
+    guard let port = listener?.port?.rawValue, port != 0 else { return nil }
+    return port
   }
 
   /// Ends the link. A Mac that is connected is first told what the proxy last had to say, e.g.
@@ -100,6 +105,7 @@ final class DirectLinkListener {
   /// The service is only advertised while no Mac is connected. Advertising over device-to-device
   /// Wi-Fi keeps the radio busy looking around, which slows the very connection it led to.
   private func advertise(_ on: Bool) {
+    guard announces else { return }
     listener?.service = on
       ? NWListener.Service(name: DirectLink.serviceName(code: code), type: DirectLink.serviceType)
       : nil
@@ -113,7 +119,7 @@ final class DirectLinkListener {
       // never appears.
       let current = generation
       queue.asyncAfter(deadline: .now() + Self.advertisingTimeout) { [weak self] in
-        guard let self, generation == current, !isAdvertised, !hasLink else { return }
+        guard let self, announces, generation == current, !isAdvertised, !hasLink else { return }
         problem = "Your Mac can't find this iPhone. Allow Nothering to use the local network in Settings > Privacy & Security > Local Network."
         logger.error("direct link: the service wasn't registered")
       }

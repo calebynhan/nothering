@@ -55,8 +55,13 @@ final class PhoneForwarder {
       UserDefaults.standard.set(preference.rawValue, forKey: Self.preferenceKey)
       route.preference = preference
       refreshLink()
+      if preference != .direct {
+        // An ask that is still under way would start the iPhone's proxy for a link nobody wants.
+        waker?.waker.cancel()
+        wakeProblem = nil
+      }
       // Choosing the direct link without a code is asking to pair, so there is nothing more to click.
-      if preference == .direct, oldValue != .direct, !isPaired, pairing == nil {
+      if preference == .direct, oldValue != .direct, !isPaired, !isPairing {
         startPairing()
       }
     }
@@ -73,6 +78,13 @@ final class PhoneForwarder {
   var isPaired: Bool { DirectLinkCode.isValid(directCode) }
   /// Where a pairing attempt stands, also after it failed. `nil` when none was made or it worked.
   private(set) var pairing: DirectLinkPairer.State?
+  /// An attempt is under way. One that failed holds nothing up: it only still shows why.
+  private var isPairing: Bool {
+    switch pairing {
+    case .searching, .confirming, .answered: true
+    case .failed, .paired, nil: false
+    }
+  }
   @ObservationIgnored private var pairer: DirectLinkPairer?
   /// Tells the current attempt's reports from those of one that was replaced.
   @ObservationIgnored private var pairingAttempt: UUID?
@@ -84,7 +96,7 @@ final class PhoneForwarder {
     let attempt = UUID()
     pairingAttempt = attempt
     pairing = .searching
-    let pairer = DirectLinkPairer(name: Host.current().localizedName ?? "Mac") { [weak self] state in
+    let pairer = DirectLinkPairer(name: computerName()) { [weak self] state in
       Task { @MainActor in
         guard let self, self.pairingAttempt == attempt else { return }
         self.pairingChanged(to: state)
@@ -107,12 +119,22 @@ final class PhoneForwarder {
     pairer?.confirm()
   }
 
+  /// Drops the pairing code, so another one can be typed or the iPhone paired again.
+  func forgetPairing() {
+    cancelPairing()
+    waker?.waker.cancel()
+    wakeProblem = nil
+    directCode = ""
+  }
+
   private func pairingChanged(to state: DirectLinkPairer.State) {
     switch state {
     case let .paired(code):
       pairer = nil
       pairingAttempt = nil
       pairing = nil
+      // Whatever kept the iPhone from being woken was about the code before this one.
+      wakeProblem = nil
       // From here it is the same as a code typed in.
       directCode = code
       preference = .direct
@@ -129,50 +151,87 @@ final class PhoneForwarder {
 
   /// How often the iPhone is asked again while it is wanted and not connected.
   private static let wakeInterval: TimeInterval = 20
+  /// The longest wait between two asks, after ones the iPhone heard that still brought no link.
+  private static let longestWakeInterval: TimeInterval = 10 * 60
   /// How long the Mac stays off the direct link after capture is switched off. The iPhone's proxy
   /// stops once no Mac has connected for a while, which it never would with this one still there.
   private static let releasePause: TimeInterval = 60
+  /// How long switching on counts while capture isn't on yet. It takes a moment to show, and on a
+  /// Mac with no network of its own it may only start once the iPhone is linked.
+  private static let switchOnPatience: TimeInterval = 60
+  /// How long switching off counts while capture still shows as on.
+  private static let switchOffSettle: TimeInterval = 5
 
   /// Whether capture is on, as the switch shows it. Set by the app.
   @ObservationIgnored var isCaptureOn: @MainActor () -> Bool = { false }
+  /// Called when capture should be asked for once more: it was switched on while the Mac had no
+  /// network at all, where it may not start, and the Mac has just been given its stand-in. With
+  /// `true` when the person used the switch, `false` when it follows the iPhone's proxy.
+  @ObservationIgnored var onTurnOnAgain: ((Bool) -> Void)?
   /// Why the iPhone can't be woken, e.g. Bluetooth is off on this Mac.
   private(set) var wakeProblem: String?
   @ObservationIgnored private var waker: (code: String, waker: DirectLinkWaker)?
   @ObservationIgnored private var lastWakeAt = Date.distantPast
-  /// When the person last switched capture on, which takes a moment to show in `isCaptureOn`.
-  @ObservationIgnored private var switchedOnAt = Date.distantPast
-  /// The person stopped the proxy on the iPhone. It isn't woken again until they use the switch here.
+  /// Asks the iPhone heard that brought no link, since there last was one.
+  @ObservationIgnored private var fruitlessWakes = 0
+  /// The last time capture was switched, by the person or to follow the iPhone's proxy. It takes
+  /// a moment to show in `isCaptureOn`, in either direction.
+  @ObservationIgnored private var lastSwitch: (on: Bool, byHand: Bool, at: Date)?
+  /// The person stopped the proxy on the iPhone. It isn't woken again until they start it there, or
+  /// switch capture on here.
   @ObservationIgnored private var isWakeHeld = false
 
   /// The person used the capture switch. On has the iPhone start its proxy over Bluetooth, so
   /// nobody has to pick it up. Off lets the iPhone go, so its proxy stops by itself.
   func captureSwitched(on: Bool) {
-    isWakeHeld = false
+    lastSwitch = (on, true, .now)
     if on {
-      switchedOnAt = .now
+      isWakeHeld = false
+      fruitlessWakes = 0
+      lastWakeAt = .distantPast
       route.resumeDirect()
       refreshLink()
       wakePhoneIfWanted()
     } else {
-      switchedOnAt = .distantPast
       waker?.waker.cancel()
       if preference == .direct {
         route.pauseDirect(for: Self.releasePause)
-        refreshLink()
       }
+      refreshLink()
     }
+  }
+
+  /// Capture turned on or off, by the switch or any other way, e.g. it was still on from before
+  /// the app was opened. The link and the stand-in network follow it.
+  func captureChanged() {
+    refreshLink()
   }
 
   /// Capture is on, or about to be, so the person wants the iPhone's connection now.
   private var wantsPhone: Bool {
-    isCaptureOn() || Date.now.timeIntervalSince(switchedOnAt) < Self.wakeInterval
+    if let lastSwitch {
+      let age = Date.now.timeIntervalSince(lastSwitch.at)
+      if lastSwitch.on, age < Self.switchOnPatience { return true }
+      if !lastSwitch.on, age < Self.switchOffSettle { return false }
+    }
+    return isCaptureOn()
+  }
+
+  /// Whether the direct link is kept at all right now: only while somebody asked for the iPhone.
+  /// The iPhone's proxy never stops by itself while a Mac is linked, so a Mac that held the link
+  /// for nothing would keep the proxy and both radios busy for as long as the two are near.
+  private var keepsDirectLink: Bool {
+    wantsPhone || autoTurnOn
   }
 
   /// Asks the iPhone to start its proxy when the direct link is wanted and not there. Only then: a
   /// Mac that woke the iPhone whenever it was near would put itself on cellular data unasked.
   private func wakePhoneIfWanted() {
-    guard preference == .direct, isPaired, link == .none, pairing == nil, !isWakeHeld, wantsPhone,
-          Date.now.timeIntervalSince(lastWakeAt) >= Self.wakeInterval
+    // After asks that were heard and brought no link, each one waits twice as long: asking as
+    // often changes nothing, and every time starts the iPhone's proxy and its notification over.
+    let wait = min(Self.wakeInterval * pow(2, Double(fruitlessWakes)), Self.longestWakeInterval)
+    guard preference == .direct, isPaired, link == .none, !isPairing, !isWakeHeld, wantsPhone,
+          Date.now.timeIntervalSince(lastWakeAt) >= wait
     else { return }
     lastWakeAt = .now
     let code = DirectLinkCode.normalized(directCode)
@@ -187,8 +246,11 @@ final class PhoneForwarder {
 
   private func wakeFinished(_ outcome: DirectLinkWaker.Outcome) {
     switch outcome {
-    case .woke, .notFound:
-      // Found or not, the direct link's own search picks the iPhone up once its proxy runs.
+    case .woke:
+      // The direct link's own search picks the iPhone up once its proxy runs.
+      fruitlessWakes += 1
+      wakeProblem = nil
+    case .notFound:
       wakeProblem = nil
     case .refused:
       wakeProblem = "An iPhone with Nothering is nearby, but it has another pairing code. If it is yours, pair again."
@@ -202,17 +264,26 @@ final class PhoneForwarder {
   /// The Mac has no network of its own, and the helper that stands in for one isn't installed,
   /// see `OfflineNetwork`. Its apps won't try to connect until it is.
   private(set) var needsOfflineHelper = false
+  /// The helper is installed and still didn't give the Mac its stand-in network.
+  private(set) var offlineHelperFailed = false
 
-  /// Gives the Mac a stand-in network while the iPhone is linked and the Mac has none, e.g. in a
-  /// car, and takes it away with the link, so the Mac never believes in a network that leads nowhere.
+  /// Gives the Mac a stand-in network while the iPhone is linked, wanted, and the Mac has no
+  /// network of its own, e.g. in a car. It goes with the link, and with capture: a linked iPhone
+  /// carries nothing while capture is off, and the Mac shouldn't believe in a network that leads
+  /// nowhere.
   private func keepMacOnline() {
-    let isLinked = link != .none
+    let isWanted = link != .none && wantsPhone
     Task.detached {
       var needsHelper = false
-      if isLinked {
+      var failed = false
+      var cameUp = false
+      if isWanted {
         if !OfflineNetwork.macHasNetwork() {
           if OfflineNetwork.isInstalled {
-            OfflineNetwork.up()
+            let wasUp = OfflineNetwork.isUp()
+            let isUp = OfflineNetwork.up()
+            cameUp = isUp && !wasUp
+            failed = !isUp
           } else {
             needsHelper = true
           }
@@ -220,9 +291,22 @@ final class PhoneForwarder {
       } else if OfflineNetwork.isUp() {
         OfflineNetwork.down()
       }
-      let result = needsHelper
-      await MainActor.run { self.needsOfflineHelper = result }
+      let result = (needsHelper, failed, cameUp)
+      await MainActor.run {
+        self.needsOfflineHelper = result.0
+        self.offlineHelperFailed = result.1
+        if result.2 { self.networkCameUp() }
+      }
     }
+  }
+
+  /// The Mac just got its stand-in network. Capture that was asked for while the Mac had no
+  /// network at all may not have started, so it is asked for once more.
+  private func networkCameUp() {
+    guard let lastSwitch, lastSwitch.on, Date.now.timeIntervalSince(lastSwitch.at) < Self.switchOnPatience,
+          !isCaptureOn()
+    else { return }
+    onTurnOnAgain?(lastSwitch.byHand)
   }
 
   /// Installs the helper, with the system's dialog for an administrator's password.
@@ -234,7 +318,11 @@ final class PhoneForwarder {
   }
 
   var autoTurnOn = UserDefaults.standard.bool(forKey: autoTurnOnKey) {
-    didSet { UserDefaults.standard.set(autoTurnOn, forKey: Self.autoTurnOnKey) }
+    didSet {
+      UserDefaults.standard.set(autoTurnOn, forKey: Self.autoTurnOnKey)
+      // Following the iPhone's proxy takes the direct link to see it by, also with capture off.
+      refreshLink()
+    }
   }
   /// Called with `true` when the iPhone's proxy becomes reachable and `false` when it goes away, while
   /// `autoTurnOn` is set. Fires only on transitions, so a manual toggle sticks until the next one.
@@ -287,6 +375,7 @@ final class PhoneForwarder {
   /// idle hotspot clients while the phone is locked.
   private func refreshLink() {
     let route = route
+    route.isDirectWanted = keepsDirectLink
     Task.detached {
       let result = route.refresh()
       await MainActor.run {
@@ -297,7 +386,15 @@ final class PhoneForwarder {
         self.detected = result.detected
         self.hint = result.hint
         self.trackPhoneProxy(previousLink: previousLink)
+        if isReachable {
+          // Whatever kept the iPhone from being woken, it is here now.
+          self.fruitlessWakes = 0
+          self.wakeProblem = nil
+        }
         if self.autoTurnOn, wasReachable != isReachable {
+          // Counts like the switch, in both directions: the Mac gets its stand-in network before
+          // capture needs it, and an iPhone whose proxy went isn't woken right back.
+          self.lastSwitch = (isReachable, false, .now)
           self.onAutoTurnOn?(isReachable)
         }
         self.wakePhoneIfWanted()
@@ -333,6 +430,9 @@ final class PhoneForwarder {
     if update == .event(.stopped) {
       // Stopped by hand on the iPhone. Waking it right back would undo that.
       isWakeHeld = true
+    } else if update == .opened {
+      // Its person started it again, so it may be woken the next time it is lost.
+      isWakeHeld = false
     }
     if update == .closed {
       refreshLink()
@@ -359,6 +459,7 @@ final class PhoneRoute: @unchecked Sendable {
   private var storedOnDirectStatusChange: (@Sendable () -> Void)?
   /// The direct link is left alone until then, see `pauseDirect`.
   private var directPausedUntil = Date.distantPast
+  private var storedIsDirectWanted = false
   /// The direct link's client, kept while `direct` is selected with the code it was made for.
   private var direct: (code: String, client: DirectLinkClient)?
 
@@ -375,6 +476,12 @@ final class PhoneRoute: @unchecked Sendable {
   var directCode: String {
     get { lock.withLock { storedDirectCode } }
     set { lock.withLock { storedDirectCode = newValue } }
+  }
+
+  /// Whether to look for the phone over the direct link at all, see `PhoneForwarder.keepsDirectLink`.
+  var isDirectWanted: Bool {
+    get { lock.withLock { storedIsDirectWanted } }
+    set { lock.withLock { storedIsDirectWanted = newValue } }
   }
 
   /// Keeps this Mac off the direct link for a while, so the iPhone sees it leave.
@@ -425,15 +532,15 @@ final class PhoneRoute: @unchecked Sendable {
       stopDirect()
       return RefreshResult(link: .none, detected: .none, hint: "Type the pairing code shown in Nothering on your iPhone")
     }
-    guard lock.withLock({ directPausedUntil <= Date() }) else {
+    guard lock.withLock({ storedIsDirectWanted && directPausedUntil <= Date() }) else {
       stopDirect()
-      return RefreshResult(link: .none, detected: .none, hint: "Switch Nothering on to use your iPhone's connection again")
+      return RefreshResult(link: .none, detected: .none, hint: "Switch Nothering on to use your iPhone's connection")
     }
     let client = directClient(code: DirectLinkCode.normalized(code))
     switch client.currentStatus {
     case .connected:
       // Also the sign of life the phone's app waits for: it stops its proxy once no Mac has
-      // connected for a while, and with capture off nothing else opens a stream.
+      // connected for a while, and an idle Mac opens no other stream.
       if let fd = try? client.connect() { close(fd) }
       return RefreshResult(link: .direct, detected: .direct, hint: nil)
     case .searching, .connecting:

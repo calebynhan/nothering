@@ -110,7 +110,9 @@ private final class SocketLink: @unchecked Sendable {
     signal(SIGPIPE, SIG_IGN)
     let (near, far) = PipeEnd.pair(queue: queue, pieceSize: 1400)
     client = Mux(transport: near, role: .client)
-    server = Mux(transport: far, role: .server, onStream: { [unowned self] stream in
+    server = Mux(transport: far, role: .server, onStream: { [weak self] stream in
+      // A stream that arrives after its test is over has nobody to serve it.
+      guard let self else { return stream.cancel() }
       let (inner, outer) = makeSocketPair()
       Thread.detachNewThread { echoUntilEOF(outer) }
       relay(inner, stream)

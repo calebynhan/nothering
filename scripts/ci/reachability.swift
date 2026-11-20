@@ -67,7 +67,7 @@ if let store = SCDynamicStoreCreate(nil, "nothering-probe" as CFString, nil, nil
   let services = SCDynamicStoreCopyKeyList(store, "State:/Network/Service/[^/]+/IPv4" as CFString) as? [String] ?? []
   print("IPv4 services: \(services)")
   // What CFNetwork hands to apps: the primary service's proxies, merged.
-  let proxies = SCDynamicStoreCopyProxies(store, nil) as? [String: Any] ?? [:]
+  let proxies = SCDynamicStoreCopyProxies(store) as? [String: Any] ?? [:]
   let socks = ["SOCKSEnable", "SOCKSProxy", "SOCKSPort"].map { "\($0)=\(proxies[$0].map { "\($0)" } ?? "none")" }
   print("proxies for apps: \(socks.joined(separator: " "))")
 }

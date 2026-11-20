@@ -9,8 +9,11 @@ import Testing
 /// code really connects, that another code is turned away, and that the proxy serves what arrives
 /// that way. What it can't show is the radio link between two devices.
 ///
-/// One at a time: each test advertises the same Bonjour service, and the Mac's side would find
-/// another test's.
+/// Most tests connect by port and leave the phone's Bonjour service unannounced: announcing takes
+/// the system's leave to use the local network, and a build machine has nobody to give it. The
+/// three that go through the search announce it, and say so when the machine wouldn't let them.
+///
+/// One at a time: those three would find each other's service.
 @Suite(.serialized) struct DirectLinkLoopbackTests {
   private static let code = "K7QM-2XBD-9RTH-W4PN-6CEA"
 
@@ -128,9 +131,9 @@ import Testing
   /// A phone that never finishes the handshake doesn't keep the Mac waiting for it for ever: the
   /// names differ, so the Mac's side doesn't even start, and it says that another phone is there.
   @Test func theMacLeavesAPhoneWithAnotherCodeAlone() async throws {
-    let server = try await startPhone()
+    let server = try await startPhone(announces: true)
     defer { server.stop() }
-    _ = try await linkPort(of: server)
+    guard await isListening(server) else { return }
 
     let client = DirectLinkClient(code: "AAAA-AAAA-AAAA-AAAA-AAAA")
     client.start()
@@ -153,7 +156,9 @@ import Testing
     let plain = NWConnection(host: .ipv4(.loopback), port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
     try await plain.startAndWaitReady()
     defer { plain.cancel() }
-    try? await plain.sendAsync(Data([0x05, 0x01, 0x00]))
+    // A SOCKS greeting and then some: enough bytes for the phone's side to see that this is no
+    // handshake, instead of waiting for the rest of one.
+    try? await plain.sendAsync(Data([0x05, 0x01, 0x00, 0x05, 0x01, 0x00, 0x00, 0x00]))
     let reply = try? await plain.receiveExactly(2)
     #expect(reply == nil || reply?.isEmpty == true)
     #expect(server.currentStats().totalDirectConnections == 0)
@@ -197,9 +202,9 @@ import Testing
   @Test func theMacFindsThePhoneAndHandsOutASocket() async throws {
     let (echo, echoPort) = try await startEchoServer()
     defer { echo.cancel() }
-    let server = try await startPhone()
+    let server = try await startPhone(announces: true)
     defer { server.stop() }
-    _ = try await linkPort(of: server)
+    guard await isListening(server) else { return }
 
     let client = DirectLinkClient(code: Self.code)
     client.start()
@@ -235,11 +240,11 @@ import Testing
   /// The whole of pairing from the Mac's side, with the same caveat about finding the service.
   @Test func theMacFindsThePhoneToPairWith() async throws {
     let requests = Locked<[DirectLinkPairingRequest]>([])
-    let server = try await startPhone { request in
+    let server = try await startPhone(announces: true) { request in
       if let request { requests.update { $0.append(request) } }
     }
     defer { server.stop() }
-    _ = try await pairingPort(of: server)
+    guard await isListening(server, forPairing: true) else { return }
 
     let states = Locked<[DirectLinkPairer.State]>([])
     let pairer = DirectLinkPairer(name: "Test Mac") { state in states.update { $0.append(state) } }
@@ -265,9 +270,12 @@ import Testing
 
   // MARK: The phone's side
 
-  private func startPhone(onPairingRequest: (@Sendable (DirectLinkPairingRequest?) -> Void)? = nil) async throws -> ProxyServer {
+  private func startPhone(
+    announces: Bool = false, onPairingRequest: (@Sendable (DirectLinkPairingRequest?) -> Void)? = nil
+  ) async throws -> ProxyServer {
     let server = ProxyServer(configuration: .init(
-      port: .any, requiredInterfaceType: nil, directLinkCode: Self.code, onPairingRequest: onPairingRequest
+      port: .any, requiredInterfaceType: nil, directLinkCode: Self.code, onPairingRequest: onPairingRequest,
+      announcesDirectLink: announces
     ))
     _ = try await server.start()
     // As with the app in front of its person.
@@ -284,6 +292,19 @@ import Testing
   private func pairingPort(of server: ProxyServer) async throws -> UInt16 {
     #expect(await until { server.directLinkPorts().pairing != nil }, "pairing isn't listening")
     return try #require(server.directLinkPorts().pairing)
+  }
+
+  /// For the tests that go through the search. With its service announced, the phone's side may
+  /// not come up at all where the local network may not be used. That is said, and not a failure.
+  private func isListening(_ server: ProxyServer, forPairing: Bool = false) async -> Bool {
+    let isUp = await until {
+      let ports = server.directLinkPorts()
+      return (forPairing ? ports.pairing : ports.link) != nil
+    }
+    if !isUp {
+      print("NOTE DirectLinkLoopbackTests: the phone's side didn't come up with its service announced (\(server.directLinkProblem() ?? "no reason given")). The search wasn't tested here.")
+    }
+    return isUp
   }
 }
 
@@ -302,26 +323,33 @@ private final class MacSide: @unchecked Sendable {
 
   static func connect(port: UInt16, parameters: NWParameters, muxed: Bool = true) async throws -> MacSide {
     let side = MacSide(connection: NWConnection(host: .ipv4(.loopback), port: NWEndpoint.Port(rawValue: port)!, using: parameters))
-    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-      side.connection.stateUpdateHandler = { state in
-        switch state {
-        case .ready:
-          side.connection.stateUpdateHandler = nil
-          if muxed {
-            let mux = Mux(transport: side.connection, role: .client)
-            side.mux = mux
-            mux.start()
+    do {
+      try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+        side.queue.async {
+          let waiting = Waiting(continuation, on: side.queue, for: "connecting to the phone's side")
+          side.connection.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+              side.connection.stateUpdateHandler = nil
+              if muxed {
+                let mux = Mux(transport: side.connection, role: .client)
+                side.mux = mux
+                mux.start()
+              }
+              waiting.finish(.success(()))
+            case let .failed(error), let .waiting(error):
+              side.connection.stateUpdateHandler = nil
+              waiting.finish(.failure(error))
+            default:
+              break
+            }
           }
-          continuation.resume()
-        case let .failed(error), let .waiting(error):
-          side.connection.stateUpdateHandler = nil
-          side.connection.cancel()
-          continuation.resume(throwing: error)
-        default:
-          break
+          side.connection.start(queue: side.queue)
         }
       }
-      side.connection.start(queue: side.queue)
+    } catch {
+      side.close()
+      throw error
     }
     return side
   }
@@ -345,15 +373,16 @@ private final class MacSide: @unchecked Sendable {
 
   func send(_ data: Data, on stream: MuxStream) async throws {
     try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-      queue.async {
+      queue.async { [queue] in
+        let waiting = Waiting(continuation, on: queue, for: "sending \(data.count) bytes")
         // In pieces a stream takes at once, each after the one before, like a relay does.
         var offset = 0
         func next() {
-          guard offset < data.count else { return continuation.resume() }
+          guard offset < data.count else { return waiting.finish(.success(())) }
           let piece = data.subdata(in: offset..<min(offset + 64 * 1024, data.count))
           offset += piece.count
           stream.write(piece) { error in
-            if let error { return continuation.resume(throwing: error) }
+            if let error { return waiting.finish(.failure(error)) }
             next()
           }
         }
@@ -363,15 +392,16 @@ private final class MacSide: @unchecked Sendable {
   }
 
   func receive(_ count: Int, from stream: MuxStream) async throws -> Data {
-    try await withCheckedThrowingContinuation { continuation in
-      queue.async {
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
+      queue.async { [queue] in
+        let waiting = Waiting(continuation, on: queue, for: "receiving \(count) bytes")
         var received = Data()
         func next() {
           stream.read(minimum: 1, maximum: min(64 * 1024, count - received.count)) { data, isComplete, error in
             if let data { received.append(data) }
-            if let error { return continuation.resume(throwing: error) }
+            if let error { return waiting.finish(.failure(error)) }
             if received.count == count || isComplete || data == nil {
-              return continuation.resume(returning: received)
+              return waiting.finish(.success(received))
             }
             next()
           }
@@ -379,6 +409,34 @@ private final class MacSide: @unchecked Sendable {
         next()
       }
     }
+  }
+}
+
+/// Resumes a continuation once: with what happened, or with an error when nothing did in time. A
+/// wait with no end would hold up the whole run instead of failing one test. Used on one queue.
+private final class Waiting<Value>: @unchecked Sendable {
+  private var continuation: CheckedContinuation<Value, Error>?
+
+  init(_ continuation: CheckedContinuation<Value, Error>, on queue: DispatchQueue, for what: String, within seconds: Int = 30) {
+    self.continuation = continuation
+    queue.asyncAfter(deadline: .now() + .seconds(seconds)) { [self] in
+      finish(.failure(TimedOut(what: what, seconds: seconds)))
+    }
+  }
+
+  func finish(_ result: Result<Value, Error>) {
+    guard let continuation else { return }
+    self.continuation = nil
+    continuation.resume(with: result)
+  }
+}
+
+private struct TimedOut: Error, CustomStringConvertible {
+  let what: String
+  let seconds: Int
+
+  var description: String {
+    "\(what): nothing happened in \(seconds) s"
   }
 }
 

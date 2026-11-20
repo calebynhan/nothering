@@ -72,7 +72,14 @@ struct MenuBarPanel: View {
         Toggle("Nothering", isOn: Binding(get: { controller.isRunning }, set: { isOn in
           // On also wakes the iPhone, and off lets it go, so it needn't be touched for either.
           forwarder.captureSwitched(on: isOn)
-          Task { await controller.toggle() }
+          // What the switch says, not the opposite of whatever capture is by the time this runs.
+          Task {
+            if isOn {
+              await controller.turnOn()
+            } else {
+              controller.turnOff()
+            }
+          }
         }))
           .toggleStyle(.switch)
           .labelsHidden()
@@ -92,6 +99,12 @@ struct MenuBarPanel: View {
           .foregroundStyle(.red)
           .fixedSize(horizontal: false, vertical: true)
         Button("Install Helper…") { forwarder.installOfflineHelper() }
+      } else if forwarder.offlineHelperFailed {
+        Text("This Mac has no network of its own, and the helper didn't give it a stand-in, so its apps won't try to connect. Installing the helper again may fix it.")
+          .font(.caption)
+          .foregroundStyle(.red)
+          .fixedSize(horizontal: false, vertical: true)
+        Button("Install Helper Again…") { forwarder.installOfflineHelper() }
       }
       if !controller.hasTurnedOn {
         Text("macOS will ask twice to add proxies — allow both")
@@ -153,16 +166,21 @@ struct MenuBarPanel: View {
         .font(.caption)
         .foregroundStyle(.red)
         .fixedSize(horizontal: false, vertical: true)
-      Button("Try Again") { forwarder.startPairing() }
+      HStack {
+        Button("Try Again") { forwarder.startPairing() }
+        // Back to where the code can be typed, or to the pairing this Mac already has.
+        Button(forwarder.isPaired ? "Cancel" : "Type the Code Instead") { forwarder.cancelPairing() }
+      }
     case .paired, nil:
       if forwarder.isPaired {
+        caption("Paired with your iPhone. Switching Nothering on wakes it over Bluetooth, so there is nothing to do on it.")
         HStack {
-          caption("Paired with your iPhone. Switching Nothering on wakes it over Bluetooth, so there is nothing to do on it.")
-          Spacer()
           Button("Pair Again") { forwarder.startPairing() }
-            .buttonStyle(.link)
-            .font(.caption)
+          // The way back to typing a code, e.g. after one that was mistyped.
+          Button("Forget") { forwarder.forgetPairing() }
         }
+        .buttonStyle(.link)
+        .font(.caption)
         if let problem = forwarder.wakeProblem {
           Text(problem)
             .font(.caption)

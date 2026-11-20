@@ -331,19 +331,29 @@ private final class Pairing: @unchecked Sendable {
   init(code: String, name: String, answerTimeout: TimeInterval = DirectLinkPairing.answerTimeout) {
     // A few bytes at a time, so every message arrives in pieces.
     let (near, far) = PipeEnd.pair(queue: queue, pieceSize: 7)
+    // Weakly: an attempt a test leaves unfinished outlives the test, and still ends later, when
+    // its own time is up.
     responder = PairingResponder(
       transport: far, queue: queue, code: code, answerTimeout: answerTimeout,
-      ask: { [unowned self] in requests.append($0) },
-      onEnd: { [unowned self] in ended.append($0) }
+      ask: { [weak self] in self?.requests.append($0) },
+      onEnd: { [weak self] in self?.ended.append($0) }
     )
     requester = PairingRequester(
       transport: near, queue: queue, name: name,
-      onDigits: { [unowned self] in digits.append($0) },
-      completion: { [unowned self] in results.append($0) }
+      onDigits: { [weak self] in self?.digits.append($0) },
+      completion: { [weak self] in self?.results.append($0) }
     )
     queue.sync {
       responder.start()
       requester.start()
+    }
+  }
+
+  deinit {
+    // Ends what the test left open, so nothing of it is still waiting when later tests run.
+    queue.async { [requester, responder] in
+      requester?.cancel()
+      responder?.cancel()
     }
   }
 

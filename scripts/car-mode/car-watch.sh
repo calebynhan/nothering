@@ -15,6 +15,9 @@ PATH=/sbin:/usr/sbin:/bin:/usr/bin
 export PATH
 
 HELPER=/Library/PrivilegedHelperTools/nothering-offline-network
+# The helper's network, as the system's network state names it, and the interface it is on.
+SERVICE=NOTHERING-OFFLINE
+NEAR=feth5478
 # Where the Mac app serves its link to the iPhone, for its own extension.
 PORT=11080
 
@@ -24,28 +27,25 @@ linked() {
   [ "$reply" = "0500" ]
 }
 
-default_interface() {
-  route -n get "$1" default 2>/dev/null | awk '/interface:/ { print $2 }'
+# The service the Mac is on for IPv4 or IPv6, as the system's network state names it. Empty when
+# it is on none.
+primary_service() {
+  echo "show State:/Network/Global/$1" | scutil | awk '$1 == "PrimaryService" { print $3 }'
 }
 
-# A default route that isn't the helper's. Tunnels and the device-to-device Wi-Fi interfaces have
-# IPv6 routes of their own on any Mac, so those don't count.
+# The Mac has a way out of its own: a service other than the stand-in is the one it is on. The
+# helper asks the same, so the two never disagree about bringing the stand-in up. A service with
+# no router never is the one, e.g. a tunnel that only takes its own addresses.
 has_network() {
-  case "$(default_interface -inet)" in
-    '' | feth*) ;;
-    *) return 0 ;;
-  esac
-  case "$(default_interface -inet6)" in
-    '' | utun* | awdl* | llw* | feth*) return 1 ;;
-    *) return 0 ;;
-  esac
+  primary=$(primary_service IPv4)
+  if [ -n "$primary" ] && [ "$primary" != "$SERVICE" ]; then
+    return 0
+  fi
+  [ -n "$(primary_service IPv6)" ]
 }
 
 standin_up() {
-  case "$(default_interface -inet)" in
-    feth*) return 0 ;;
-    *) return 1 ;;
-  esac
+  ifconfig "$NEAR" >/dev/null 2>&1
 }
 
 while :; do

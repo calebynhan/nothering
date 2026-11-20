@@ -23,6 +23,8 @@ final class ExtensionController: NSObject {
   private(set) var hasTurnedOn = UserDefaults.standard.bool(forKey: hasTurnedOnKey) {
     didSet { UserDefaults.standard.set(hasTurnedOn, forKey: Self.hasTurnedOnKey) }
   }
+  /// Called when capture turns on or off, however that came about. Set by the app.
+  @ObservationIgnored var onRunningChange: (@MainActor () -> Void)?
   private var manager: NETransparentProxyManager?
   private var loading: Task<Void, Never>?
   private var isRemoving = false
@@ -182,7 +184,11 @@ final class ExtensionController: NSObject {
 
   private func refreshStatus() {
     let connectionStatus = manager?.connection.status ?? .invalid
+    let wasRunning = isRunning
     isRunning = connectionStatus == .connected || connectionStatus == .connecting
+    if isRunning != wasRunning {
+      onRunningChange?()
+    }
     switch connectionStatus {
     case .connected:
       status = "On"

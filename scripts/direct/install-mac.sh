@@ -32,6 +32,9 @@ mv "$TOOL.new" "$TOOL"
 
 echo "Installing the helper that keeps the Mac's apps going when the Mac has no network of its own."
 echo "It needs an administrator's password, this once."
+# Asked for here, where this script is what the terminal is listening to. The tool then finds the
+# password already given.
+sudo -v
 "$TOOL" --install-helper
 
 cat > "$LAUNCHER" <<LAUNCHER

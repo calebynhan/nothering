@@ -36,12 +36,17 @@ final class DirectLinkPairingListener {
 
   /// `onRequest` gets a request to show, and `nil` when the request it last got is over, answered
   /// or not, e.g. the Mac gave up or nobody answered in time.
-  init(code: String, queue: DispatchQueue, onRequest: @escaping (DirectLinkPairingRequest?) -> Void) throws {
+  init(
+    code: String, queue: DispatchQueue, announces: Bool = true,
+    onRequest: @escaping (DirectLinkPairingRequest?) -> Void
+  ) throws {
     self.queue = queue
     self.code = code
     self.onRequest = onRequest
     listener = try NWListener(using: DirectLink.pairingParameters)
-    listener.service = NWListener.Service(type: DirectLinkPairing.serviceType)
+    if announces {
+      listener.service = NWListener.Service(type: DirectLinkPairing.serviceType)
+    }
     listener.newConnectionHandler = { [weak self] connection in
       self?.accept(connection)
     }
@@ -58,7 +63,9 @@ final class DirectLinkPairingListener {
 
   /// Where it listens, once it does. The Mac finds it by its Bonjour service, so only tests ask.
   var port: UInt16? {
-    listener.port?.rawValue
+    // A listener that isn't ready yet says 0, not nothing.
+    guard let port = listener.port?.rawValue, port != 0 else { return nil }
+    return port
   }
 
   func cancel() {

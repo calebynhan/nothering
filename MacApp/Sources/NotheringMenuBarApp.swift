@@ -26,6 +26,16 @@ struct NotheringMenuBarApp: App {
       }
     }
     forwarder.isCaptureOn = { [weak controller] in controller?.isRunning ?? false }
+    controller.onRunningChange = { [weak forwarder] in forwarder?.captureChanged() }
+    forwarder.onTurnOnAgain = { [weak controller] byHand in
+      Task {
+        if !byHand {
+          await controller?.turnOnAutomatically()
+        } else if controller?.isRunning == false {
+          await controller?.turnOn()
+        }
+      }
+    }
     forwarder.start()
     _forwarder = State(initialValue: forwarder)
     controller.checkExtension()

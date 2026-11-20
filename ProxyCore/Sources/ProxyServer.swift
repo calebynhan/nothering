@@ -20,19 +20,25 @@ public final class ProxyServer {
     /// over without an answer. `nil` here means a Mac can only be paired by typing the code. A Mac
     /// can only ask while `setAcceptsPairing` says so.
     public var onPairingRequest: (@Sendable (DirectLinkPairingRequest?) -> Void)?
+    /// Whether the direct link and pairing are announced, which is how a Mac finds them. Off for
+    /// tests that connect by port: announcing takes the system's leave to use the local network,
+    /// and a build machine has nobody to give it.
+    public var announcesDirectLink: Bool
 
     public init(
       port: NWEndpoint.Port = 11080,
       requiredInterfaceType: NWInterface.InterfaceType? = .cellular,
       isInterfaceAllowed: @escaping (String) -> Bool = ProxyServer.isHotspotOrLoopbackInterface,
       directLinkCode: String? = nil,
-      onPairingRequest: (@Sendable (DirectLinkPairingRequest?) -> Void)? = nil
+      onPairingRequest: (@Sendable (DirectLinkPairingRequest?) -> Void)? = nil,
+      announcesDirectLink: Bool = true
     ) {
       self.port = port
       self.requiredInterfaceType = requiredInterfaceType
       self.isInterfaceAllowed = isInterfaceAllowed
       self.directLinkCode = directLinkCode
       self.onPairingRequest = onPairingRequest
+      self.announcesDirectLink = announcesDirectLink
     }
   }
 
@@ -155,7 +161,9 @@ public final class ProxyServer {
       isStarted = true
       guard let code = configuration.directLinkCode, DirectLinkCode.isValid(code) else { return }
       do {
-        directListener = try DirectLinkListener(code: code, queue: queue) { [weak self] stream in
+        directListener = try DirectLinkListener(
+          code: code, queue: queue, announces: configuration.announcesDirectLink
+        ) { [weak self] stream in
           self?.accept(stream)
         }
         directLinkStartError = nil
@@ -179,7 +187,9 @@ public final class ProxyServer {
     guard pairingListener == nil else { return }
     // Pairing only hands out the code, so without it a Mac can still be given the code by hand.
     do {
-      pairingListener = try DirectLinkPairingListener(code: code, queue: queue, onRequest: onPairingRequest)
+      pairingListener = try DirectLinkPairingListener(
+        code: code, queue: queue, announces: configuration.announcesDirectLink, onRequest: onPairingRequest
+      )
     } catch {
       logger.error("pairing failed to start: \(error.localizedDescription, privacy: .public)")
     }

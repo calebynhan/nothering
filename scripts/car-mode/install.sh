@@ -25,17 +25,17 @@ if [ "$(uname)" != Darwin ]; then
   exit 1
 fi
 
-# Writes one of the two scripts to $2: from inside this file when it carries them, as a release's
-# does, and only otherwise from next to it. One of them ends up run as root, so a file that merely
-# has its name, in whatever directory this was started from, must never be taken for it.
-write_script() {
+# Prints one of the two scripts: from inside this file when it carries them, as a release's does,
+# and only otherwise from next to it. One of them ends up run as root, so a file that merely has
+# its name, in whatever directory this was started from, must never be taken for it.
+script_text() {
   if [ -n "$EMBEDDED" ]; then
-    embedded "$1" > "$2"
+    embedded "$1"
   elif [ -f "$HERE/$1" ]; then
-    cp "$HERE/$1" "$2"
+    cat "$HERE/$1"
   else
     echo "this copy of install.sh doesn't carry $1, and it isn't next to it" >&2
-    exit 1
+    return 1
   fi
 }
 
@@ -55,17 +55,32 @@ if [ "${1:-}" = "--remove" ]; then
   exit 0
 fi
 
-work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
-write_script offline-network.sh "$work/helper"
-echo "%admin ALL=(root) NOPASSWD: $HELPER" > "$work/rules"
+# Before the password is asked for: with nothing to install there is no reason to ask.
+script_text offline-network.sh > /dev/null
+script_text car-watch.sh > /dev/null
 
 echo "Installing the helper needs an administrator's password, this once."
-# A rule that doesn't parse would lock sudo up, so it is checked before it goes in.
-sudo /bin/sh -c "mkdir -p /Library/PrivilegedHelperTools && install -o root -g wheel -m 755 '$work/helper' '$HELPER' && visudo -cf '$work/rules' && install -o root -g wheel -m 440 '$work/rules' '$RULES'"
+# Root takes the helper from this script's own text, through a pipe, and the rule from the command
+# itself. Neither is read from a file: one that the person's other programs could change while the
+# password is being typed would end up run as root, or as the rule that says what may be. Each is
+# put together where only root can write and moved into place from there. A rule that doesn't
+# parse would lock sudo up, so it is checked before it goes in.
+script_text offline-network.sh | sudo /bin/sh -c "set -e
+umask 022
+mkdir -p /Library/PrivilegedHelperTools
+cat > '$HELPER.new'
+test -s '$HELPER.new'
+chown root:wheel '$HELPER.new'
+chmod 755 '$HELPER.new'
+mv -f '$HELPER.new' '$HELPER'
+printf '%s\n' '%admin ALL=(root) NOPASSWD: $HELPER' > '$HELPER.rule'
+visudo -cf '$HELPER.rule'
+chown root:wheel '$HELPER.rule'
+chmod 440 '$HELPER.rule'
+mv -f '$HELPER.rule' '$RULES'"
 
 mkdir -p "$SUPPORT" "$HOME/Library/LaunchAgents"
-write_script car-watch.sh "$WATCHER"
+script_text car-watch.sh > "$WATCHER"
 chmod 755 "$WATCHER"
 cat > "$AGENT" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

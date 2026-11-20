@@ -357,8 +357,18 @@ func onQueue<Value>(_ queue: DispatchQueue, _ body: @escaping () -> Value) async
   }
 }
 
-func waitUntil(on queue: DispatchQueue, _ condition: @escaping () -> Bool) async {
+/// Waits for `condition`, looked at on `queue`. Not for ever: a wait with no end would hold up the
+/// whole run instead of failing one test.
+func waitUntil(
+  on queue: DispatchQueue, within seconds: Int = 30,
+  sourceLocation: SourceLocation = #_sourceLocation, _ condition: @escaping () -> Bool
+) async {
+  let deadline = Date().addingTimeInterval(TimeInterval(seconds))
   while !(await onQueue(queue, condition)) {
+    guard Date() < deadline else {
+      Issue.record("waited \(seconds) s for something that never happened", sourceLocation: sourceLocation)
+      return
+    }
     try? await Task.sleep(nanoseconds: 2_000_000)
   }
 }

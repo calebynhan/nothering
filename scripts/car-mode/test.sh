@@ -69,19 +69,32 @@ esac
 exit 0
 EOF
 
-# Keeps the published keys in a file and answers "list" from it, in scutil's format.
+# Keeps the published keys in a file. Asked which service the Mac is on, it names the one a test
+# put in primary-IPv4 or primary-IPv6, or else the stand-in once that is published, in scutil's
+# format. A service that is only in the keys has no router, and so is never the one.
 cat > "$bin/scutil" <<'EOF'
 #!/bin/sh
 while read -r verb rest; do
   case "$verb" in
-    list)
-      n=0
-      while read -r key; do
-        case "$key" in
-          State:/Network/Service/*/IPv4) echo "  subKey [$n] = $key"; n=$((n + 1)) ;;
-        esac
-      done < "$FAKE_STATE/keys"
-      [ "$n" -eq 0 ] && echo "  no key"
+    show)
+      primary=
+      case "$rest" in
+        State:/Network/Global/IPv4)
+          if [ -s "$FAKE_STATE/primary-IPv4" ]; then
+            primary=$(cat "$FAKE_STATE/primary-IPv4")
+          elif grep -qx "State:/Network/Service/NOTHERING-OFFLINE/IPv4" "$FAKE_STATE/keys"; then
+            primary=NOTHERING-OFFLINE
+          fi
+          ;;
+        State:/Network/Global/IPv6)
+          [ -s "$FAKE_STATE/primary-IPv6" ] && primary=$(cat "$FAKE_STATE/primary-IPv6")
+          ;;
+      esac
+      if [ -n "$primary" ]; then
+        printf '<dictionary> {\n  PrimaryInterface : en0\n  PrimaryService : %s\n  Router : 192.0.2.1\n}\n' "$primary"
+      else
+        echo "  No such key"
+      fi
       ;;
     d.add)
       echo "scutil d.add $rest" >> "$FAKE_STATE/log"
@@ -100,20 +113,8 @@ done
 exit 0
 EOF
 
-# "route -n get -inet default" answers with the interface in route-inet, like the real one, and
-# fails when there is none. Everything else is logged.
 cat > "$bin/route" <<'EOF'
 #!/bin/sh
-if [ "${2:-}" = get ]; then
-  file="$FAKE_STATE/route$3"
-  [ -s "$file" ] || { echo "route: writing to routing socket: not in table" >&2; exit 1; }
-  echo "   route to: default"
-  echo "destination: default"
-  echo "    gateway: 192.0.2.1"
-  echo "  interface: $(cat "$file")"
-  echo "      flags: <UP,GATEWAY,DONE,STATIC,PRCLONING,GLOBAL>"
-  exit 0
-fi
 echo "route $*" >> "$FAKE_STATE/log"
 exit 0
 EOF
@@ -140,12 +141,11 @@ cat > "$bin/uname" <<'EOF'
 echo Darwin
 EOF
 
-# install -o root -g wheel -m MODE source destination
-cat > "$bin/install" <<'EOF'
+# Making a file root's takes root. Here it only has to be asked for.
+cat > "$bin/chown" <<'EOF'
 #!/bin/sh
-echo "install $*" >> "$FAKE_STATE/log"
-[ "$1 $2 $3 $4 $5" = "-o root -g wheel -m" ] || exit 1
-cp "$7" "$8" && chmod "$6" "$8"
+echo "chown $*" >> "$FAKE_STATE/log"
+exit 0
 EOF
 
 # visudo -cf FILE: the one rule, and nothing else.
@@ -219,15 +219,28 @@ check "does nothing" '! tail -n +$((before + 1)) "$state/log" | grep -q "create\
 echo "The helper: the process ends"
 kill "$owner"; wait "$owner" 2>/dev/null; sleep 4
 check "taken down by itself" none_left
-check "default route removed" 'grep -q "route -n delete default 198.18.0.1" "$state/log"'
+# Deleting "the default route" takes the one of whatever network the Mac is on by then.
+check "no default route is deleted" '! grep -q "route .*delete" "$state/log"'
 
 echo "The helper: a real network comes up"
 reset; sleeper; owner=$sleeper_pid
 helper up "$owner"
-echo "State:/Network/Service/AAAA-REAL/IPv4" >> "$state/keys"; sleep 4
+echo "State:/Network/Service/AAAA-REAL/IPv4" >> "$state/keys"; echo AAAA-REAL > "$state/primary-IPv4"; sleep 4
 check "taken down, the real one untouched" '! ls "$state" | grep -q "^if-" && ! grep -q NOTHERING "$state/keys" && grep -q AAAA-REAL "$state/keys"'
+check "no default route is deleted" '! grep -q "route .*delete" "$state/log"'
 said=$(helper up "$owner")
 check "up then says the Mac has a network, and creates nothing" '[ "$said" = "this Mac has a network of its own" ] && ! ls "$state" | grep -q "^if-"'
+
+echo "The helper: an IPv6-only network"
+reset; echo BBBB-REAL > "$state/primary-IPv6"
+said=$(helper up "$owner")
+check "counts as the Mac's own network" '[ "$said" = "this Mac has a network of its own" ] && ! ls "$state" | grep -q "^if-"'
+
+echo "The helper: a tunnel with addresses of its own and no router"
+reset; echo "State:/Network/Service/TUNNEL/IPv4" >> "$state/keys"
+helper up "$owner"; sleep 3
+check "is no way out: the stand-in comes up and stays" '[ -e "$state/if-feth5478" ] && grep -qx "State:/Network/Service/NOTHERING-OFFLINE/IPv4" "$state/keys"'
+helper down
 
 echo "The helper: down by hand"
 reset; helper up "$owner"; watcher=$(cat "$work/run/nothering-offline-network.watcher")
@@ -237,6 +250,26 @@ check "everything gone" none_left
 check "the watcher stopped" '! running "$watcher"'
 helper down; check "down again is harmless" "[ $? -eq 0 ] && none_left"
 check "status says down" '[ "$(helper status)" = down ]'
+
+echo "The helper: asked by a process that ignores the usual signal to end"
+reset
+(trap '' TERM; exec sh "$work/helper.sh" up "$owner")
+watcher=$(cat "$work/run/nothering-offline-network.watcher")
+check "a watcher is running" 'running "$watcher"'
+helper down
+check "the watcher stopped all the same" '! running "$watcher"'
+check "everything gone" none_left
+
+echo "The helper: a number left behind by a watcher that is gone"
+reset; sleeper; bystander=$sleeper_pid
+echo "$bystander" > "$work/run/nothering-offline-network.watcher"
+helper down
+check "the process that has the number now is left alone" 'running "$bystander"'
+check "the number is forgotten" '[ ! -e "$work/run/nothering-offline-network.watcher" ]'
+echo "not a number; touch $state/injected" > "$work/run/nothering-offline-network.watcher"
+helper down
+check "what isn't a number is run as nothing" '[ ! -e "$state/injected" ] && [ ! -e "$work/run/nothering-offline-network.watcher" ]'
+kill "$bystander"; wait "$bystander" 2>/dev/null
 
 echo "The helper: a second process takes over"
 reset; sleeper; other=$sleeper_pid
@@ -314,23 +347,29 @@ check "asks for the stand-in with the app's port, for its own lifetime" 'grep -q
 check "never asks for it to be taken down" '! grep -q down "$work/asks"'
 
 echo "The watcher: linked, and the Mac has a network of its own"
-reset; : > "$state/linked"; echo en0 > "$state/route-inet"; watch
+reset; : > "$state/linked"; echo AAAA-REAL > "$state/primary-IPv4"; watch
 check "asks for nothing" '[ ! -s "$work/asks" ]'
 
 echo "The watcher: linked, on an IPv6-only network"
-reset; : > "$state/linked"; echo en0 > "$state/route-inet6"; watch
+reset; : > "$state/linked"; echo BBBB-REAL > "$state/primary-IPv6"; watch
 check "asks for nothing" '[ ! -s "$work/asks" ]'
 
-echo "The watcher: linked, with only a tunnel's IPv6 route"
-reset; : > "$state/linked"; echo utun3 > "$state/route-inet6"; watch
+echo "The watcher: linked, with only a tunnel that has no router"
+reset; : > "$state/linked"; echo "State:/Network/Service/TUNNEL/IPv4" >> "$state/keys"; watch
 check "asks for the stand-in" 'grep -q "^sudo HELPER up " "$work/asks"'
 
+# The stand-in as the helper leaves it: its interface, and its service the one the Mac is on.
+standin() {
+  : > "$state/if-feth5478"
+  echo "State:/Network/Service/NOTHERING-OFFLINE/IPv4" >> "$state/keys"
+}
+
 echo "The watcher: linked, and the stand-in is already up"
-reset; : > "$state/linked"; echo feth5478 > "$state/route-inet"; watch
+reset; : > "$state/linked"; standin; watch
 check "asks for nothing, so it isn't torn down and rebuilt" '[ ! -s "$work/asks" ]'
 
 echo "The watcher: the iPhone is gone and the stand-in is still up"
-reset; echo feth5478 > "$state/route-inet"; watch
+reset; standin; watch
 check "asks for it to be taken down" 'grep -q "^sudo HELPER down\$" "$work/asks"'
 check "never asks for it to be brought up" '! grep -q " up " "$work/asks"'
 
@@ -352,9 +391,11 @@ try_installer() {
   HOME=$work/home sh "$1" > "$work/install.out" 2>&1
   check "installs without an error" "[ $? -eq 0 ]"
   check "the helper is in place, as the repository has it" 'cmp -s "$installed_helper" "$work/repo/offline-network.sh"'
-  check "the helper can be run and not written by others" '[ -x "$installed_helper" ] && grep -q "install -o root -g wheel -m 755 " "$state/log"'
+  check "the helper is made root's, and others can run it and not write it" 'grep -q "^chown root:wheel $installed_helper.new\$" "$state/log" && [ "$(ls -l "$installed_helper" | cut -c1-10)" = "-rwxr-xr-x" ]'
   check "the sudo rule names only the helper" '[ "$(cat "$installed_rules")" = "%admin ALL=(root) NOPASSWD: $installed_helper" ]'
-  check "the rule was checked before it went in" 'grep -n "^visudo -cf\|^install .* -m 440" "$state/log" | head -1 | grep -q visudo'
+  check "the rule was checked before it went in, and only root reads it" 'grep -q "^visudo -cf $installed_helper.rule\$" "$state/log" && [ "$(ls -l "$installed_rules" | cut -c1-10)" = "-r--r-----" ]'
+  check "nothing is left where the two were put together" '[ "$(ls "$work/system/PrivilegedHelperTools")" = nothering-offline-network ]'
+  check "root takes the helper from a pipe, and reads no file for it" 'grep -qx "cat > .$installed_helper.new." "$state/log" && ! grep -q "^install \|^cp \|install -o" "$state/log"'
   check "the watcher is in place" 'cmp -s "$watcher_file" "$work/repo/car-watch.sh" && [ -x "$watcher_file" ]'
   check "the launch agent runs the watcher" 'grep -q "<string>$watcher_file</string>" "$agent" && grep -q "<string>app.nothering.car-mode</string>" "$agent"'
   check "the launch agent is started" 'grep -q "^launchctl bootstrap gui/$(id -u) $agent\$" "$state/log"'
@@ -388,8 +429,15 @@ check "installs without an error" "[ $? -eq 0 ]"
 check "the helper is its own, not the file that was lying there" 'cmp -s "$installed_helper" "$work/repo/offline-network.sh"'
 check "the watcher is its own, not the file that was lying there" 'cmp -s "$watcher_file" "$work/repo/car-watch.sh"'
 
+echo "The installer, with nothing to install"
+rm -rf "${work:?}/home" "${work:?}/system"; mkdir -p "$work/home" "$work/system/sudoers.d" "$work/bare"; reset
+cp "$work/repo/install.sh" "$work/bare/install.sh"
+HOME=$work/home sh "$work/bare/install.sh" > "$work/install.out" 2>&1
+check "fails" "[ $? -ne 0 ]"
+check "and never asks for the password" '! grep -q "^sudo " "$state/log" && [ ! -e "$installed_helper" ]'
+
 echo "The watcher: with a network, the iPhone isn't asked"
-reset; : > "$state/linked"; echo en0 > "$state/route-inet"; watch
+reset; : > "$state/linked"; echo AAAA-REAL > "$state/primary-IPv4"; watch
 check "no connection to the iPhone's proxy" '! grep -q "^nc " "$state/log"'
 reset; : > "$state/linked"; watch
 check "without one it is asked" 'grep -q "^nc " "$state/log"'

@@ -13,5 +13,7 @@
 	<array>
 		<string>$(TeamIdentifierPrefix)$(BUNDLE_ID_PREFIX)</string>
 	</array>
+	<key>com.apple.security.device.bluetooth</key>
+	<true/>
 </dict>
 </plist>

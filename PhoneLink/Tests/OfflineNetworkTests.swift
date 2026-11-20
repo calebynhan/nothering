@@ -3,31 +3,31 @@ import Testing
 @testable import PhoneLink
 
 @Suite struct OfflineNetworkTests {
-  @Test func readsTheInterfaceOfARoute() {
+  @Test func readsTheServiceTheMacIsOn() {
     let answer = """
-         route to: default
-      destination: default
-             mask: default
-          gateway: 192.168.1.1
-        interface: en0
-            flags: <UP,GATEWAY,DONE,STATIC,PRCLONING,GLOBAL>
-       recvpipe  sendpipe  ssthresh  rtt,msec    rttvar  hopcount      mtu     expire
-             0         0         0         0         0         0      1500         0
+      <dictionary> {
+        PrimaryInterface : en0
+        PrimaryService : 0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9
+        Router : 192.168.1.1
+      }
       """
-    #expect(OfflineNetwork.interface(inRouteOutput: answer) == "en0")
+    #expect(OfflineNetwork.primaryService(inScutilOutput: answer) == "0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9")
   }
 
-  @Test func aRouteThatWasNotFoundNamesNoInterface() {
-    #expect(OfflineNetwork.interface(inRouteOutput: "route: writing to routing socket: not in table\n") == nil)
-    #expect(OfflineNetwork.interface(inRouteOutput: "") == nil)
+  @Test func aMacOnNoNetworkNamesNoService() {
+    #expect(OfflineNetwork.primaryService(inScutilOutput: "  No such key\n") == nil)
+    #expect(OfflineNetwork.primaryService(inScutilOutput: "") == nil)
+    // A router alone is no service.
+    #expect(OfflineNetwork.primaryService(inScutilOutput: "<dictionary> {\n  Router : 192.168.1.1\n}\n") == nil)
   }
 
-  /// The helper's own route is told apart by its interface, so it never counts as the Mac's network.
-  @Test func theHelpersRouteIsToldByItsInterface() {
-    let answer = "   route to: default\n    gateway: 198.18.0.1\n  interface: feth5478\n"
-    let interface = OfflineNetwork.interface(inRouteOutput: answer)
-    #expect(interface?.hasPrefix(OfflineNetwork.interfacePrefix) == true)
-    #expect(OfflineNetwork.script.contains("NEAR=\(interface ?? "")"))
+  /// The helper's own network is told apart by its name, so it never counts as the Mac's.
+  @Test func theHelpersNetworkIsToldByItsName() {
+    let answer = "<dictionary> {\n  PrimaryInterface : feth5478\n  PrimaryService : NOTHERING-OFFLINE\n  Router : 198.18.0.1\n}\n"
+    #expect(OfflineNetwork.primaryService(inScutilOutput: answer) == OfflineNetwork.serviceID)
+    let lines = OfflineNetwork.script.split(separator: "\n").map(String.init)
+    #expect(lines.contains("SERVICE=\(OfflineNetwork.serviceID)"))
+    #expect(lines.contains("NEAR=\(OfflineNetwork.interfaceName)"))
   }
 
   /// The script is a string in the source. A here-document only ends on a line that is exactly its
@@ -40,6 +40,8 @@ import Testing
     // Runs as root for anyone in the admin group: only its own fixed PATH, and no shell beyond sh.
     #expect(lines.contains("PATH=/sbin:/usr/sbin:/bin:/usr/bin"))
     #expect(!OfflineNetwork.script.contains("eval"))
+    // Deleting a default route takes the one of whatever network the Mac is on by then.
+    #expect(!lines.contains { $0.contains("route") && $0.contains("delete") && !$0.hasPrefix("  #") })
   }
 
   /// The forwarder's port is passed only when apps should be pointed at it.
@@ -52,5 +54,56 @@ import Testing
   @Test func theSudoRuleNamesOnlyTheHelper() {
     #expect(OfflineNetwork.sudoersRule == "%admin ALL=(root) NOPASSWD: /Library/PrivilegedHelperTools/nothering-offline-network")
     #expect(OfflineNetwork.helperPath.hasPrefix("/Library/PrivilegedHelperTools/"))
+  }
+
+  /// Root installs only what the commands themselves carry: nothing is read from a file that the
+  /// person's other programs could change while the password is being typed.
+  @Test func theInstallCommandsCarryWhatTheyInstall() {
+    let commands = OfflineNetwork.installCommands
+    #expect(commands.contains(OfflineNetwork.script))
+    #expect(commands.contains(OfflineNetwork.sudoersRule))
+    #expect(!commands.contains("/tmp"))
+    #expect(!commands.contains("/var/folders"))
+    // The helper's text ends where its here-document says, and nowhere before.
+    #expect(!OfflineNetwork.script.split(separator: "\n").contains { $0 == OfflineNetwork.scriptEnd })
+  }
+
+  /// The install commands as root runs them, with the system's places moved under a temporary
+  /// directory and stand-ins for the two steps that need root or sudo's own tools.
+  @Test func theInstallCommandsPutTheHelperAndItsRuleInPlace() throws {
+    let files = FileManager.default
+    let root = files.temporaryDirectory.appendingPathComponent("nothering-install-\(UUID().uuidString)")
+    let tools = root.appendingPathComponent("bin")
+    let helpers = root.appendingPathComponent("PrivilegedHelperTools")
+    let rules = root.appendingPathComponent("sudoers.d")
+    try files.createDirectory(at: tools, withIntermediateDirectories: true)
+    try files.createDirectory(at: rules, withIntermediateDirectories: true)
+    defer { try? files.removeItem(at: root) }
+    for tool in ["chown", "visudo"] {
+      let file = tools.appendingPathComponent(tool)
+      try "#!/bin/sh\nexit 0\n".write(to: file, atomically: true, encoding: .utf8)
+      try files.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
+    }
+    let commands = OfflineNetwork.installCommands
+      .replacingOccurrences(of: "/Library/PrivilegedHelperTools", with: helpers.path)
+      .replacingOccurrences(of: "/etc/sudoers.d", with: rules.path)
+
+    let shell = Process()
+    shell.executableURL = URL(fileURLWithPath: "/bin/sh")
+    shell.arguments = ["-c", "PATH=\(tools.path):$PATH\n\(commands)"]
+    try shell.run()
+    shell.waitUntilExit()
+    #expect(shell.terminationStatus == 0)
+
+    // The helper doesn't name the places that were moved. Its rule names the helper.
+    let helper = helpers.appendingPathComponent("nothering-offline-network")
+    #expect(try String(contentsOf: helper, encoding: .utf8) == OfflineNetwork.script + "\n")
+    #expect(files.isExecutableFile(atPath: helper.path))
+    let rule = rules.appendingPathComponent("nothering")
+    #expect(try String(contentsOf: rule, encoding: .utf8) == "%admin ALL=(root) NOPASSWD: \(helper.path)\n")
+    let mode = try files.attributesOfItem(atPath: rule.path)[.posixPermissions] as? NSNumber
+    #expect(mode?.intValue == 0o440)
+    // Nothing is left where it was put together.
+    #expect(try files.contentsOfDirectory(atPath: helpers.path) == ["nothering-offline-network"])
   }
 }
