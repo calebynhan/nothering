@@ -10,3 +10,7 @@ fastlane/.env*
 !fastlane/.env.example
 fastlane/report.xml
 fastlane/README.md
+# scripts/ci/run.sh and probe-offline-network.sh
+/out/
+/out-probe/
+/.build-ci/

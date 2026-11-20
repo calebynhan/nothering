@@ -1,0 +1,138 @@
+#!/bin/sh
+# Nothering's stand-in network, see OfflineNetwork.swift. Installed by `nothering --install-helper`
+# and run as root through sudo.
+#
+#   up <pid> [<port>]   bring it up, and take it down again when process <pid> ends or a real
+#                       network appears. With <port>, the Mac's apps are also told to use the SOCKS
+#                       proxy on 127.0.0.1:<port>, as long as it is up
+#   down                take it down
+#   status              say whether it is up
+PATH=/sbin:/usr/sbin:/bin:/usr/bin
+export PATH
+
+NEAR=feth5478
+FAR=feth5479
+SERVICE=NOTHERING-OFFLINE
+# From the range set aside for testing, so no real network is shadowed.
+ADDRESS=198.18.0.2
+ROUTER=198.18.0.1
+OWNER_FILE=/var/run/nothering-offline-network.owner
+WATCHER_FILE=/var/run/nothering-offline-network.watcher
+
+# Another IPv4 service in the system's network state means the Mac got a real network.
+other_network() {
+  echo "list State:/Network/Service/[^/]+/IPv4" | scutil | grep "State:/Network/Service/" | grep -v "/$SERVICE/" >/dev/null
+}
+
+is_up() {
+  ifconfig "$NEAR" >/dev/null 2>&1
+}
+
+teardown() {
+  scutil >/dev/null 2>&1 <<EOF
+remove State:/Network/Service/$SERVICE/IPv4
+remove State:/Network/Service/$SERVICE/DNS
+remove State:/Network/Service/$SERVICE/Proxies
+EOF
+  route -n delete default "$ROUTER" >/dev/null 2>&1
+  ifconfig "$NEAR" destroy >/dev/null 2>&1
+  ifconfig "$FAR" destroy >/dev/null 2>&1
+  rm -f "$OWNER_FILE"
+}
+
+down() {
+  if [ -f "$WATCHER_FILE" ]; then
+    kill "$(cat "$WATCHER_FILE")" >/dev/null 2>&1
+    rm -f "$WATCHER_FILE"
+  fi
+  teardown
+}
+
+up() {
+  owner=$1
+  proxy_port=$2
+  case "$owner" in
+    '' | *[!0-9]*)
+      echo "up needs the ID of the process to follow" >&2
+      exit 64
+      ;;
+  esac
+  # A port and nothing else: it ends up in the system's settings, written by root.
+  case "$proxy_port" in
+    '' | [1-9] | [1-9][0-9] | [1-9][0-9][0-9] | [1-9][0-9][0-9][0-9] | [1-5][0-9][0-9][0-9][0-9]) ;;
+    6[0-4][0-9][0-9][0-9] | 65[0-4][0-9][0-9] | 655[0-2][0-9] | 6553[0-5]) ;;
+    *)
+      echo "the proxy's port is a number from 1 to 65535" >&2
+      exit 64
+      ;;
+  esac
+  if ! kill -0 "$owner" 2>/dev/null; then
+    echo "no process $owner" >&2
+    exit 64
+  fi
+  if other_network; then
+    echo "this Mac has a network of its own"
+    exit 0
+  fi
+  # Already up for this process: nothing to do, and nothing to interrupt.
+  if is_up && [ -f "$OWNER_FILE" ] && [ "$(cat "$OWNER_FILE")" = "$owner" ]; then
+    exit 0
+  fi
+  down
+  ifconfig "$NEAR" create || exit 1
+  if ! ifconfig "$FAR" create; then
+    ifconfig "$NEAR" destroy
+    exit 1
+  fi
+  ifconfig "$NEAR" peer "$FAR"
+  ifconfig "$FAR" up
+  ifconfig "$NEAR" inet "$ADDRESS" netmask 255.255.255.0 up
+  # What tells macOS this is a network: a service with an address, a router and a DNS server.
+  scutil >/dev/null <<EOF
+d.init
+d.add Addresses * $ADDRESS
+d.add SubnetMasks * 255.255.255.0
+d.add InterfaceName $NEAR
+d.add Router $ROUTER
+set State:/Network/Service/$SERVICE/IPv4
+d.init
+d.add ServerAddresses * $ROUTER
+set State:/Network/Service/$SERVICE/DNS
+EOF
+  # Most apps follow the system's proxy setting. On this network it sends them to the forwarder on
+  # this Mac, which reaches the iPhone, and it is the forwarder's side that looks names up.
+  if [ -n "$proxy_port" ]; then
+    scutil >/dev/null <<EOF
+d.init
+d.add SOCKSEnable # 1
+d.add SOCKSProxy 127.0.0.1
+d.add SOCKSPort # $proxy_port
+d.add ExceptionsList * *.local 169.254/16
+set State:/Network/Service/$SERVICE/Proxies
+EOF
+  fi
+  # macOS adds the default route for a service with a router. In case it didn't.
+  route -n add default "$ROUTER" >/dev/null 2>&1
+  echo "$owner" > "$OWNER_FILE"
+  # Takes it all down again without being asked, so a Mac is never left on a network that
+  # leads nowhere after the process it was for is gone.
+  (
+    trap '' HUP INT
+    while kill -0 "$owner" 2>/dev/null && ! other_network; do
+      sleep 2
+    done
+    rm -f "$WATCHER_FILE"
+    teardown
+  ) </dev/null >/dev/null 2>&1 &
+  echo $! > "$WATCHER_FILE"
+}
+
+case "${1:-}" in
+  up) up "${2:-}" "${3:-}" ;;
+  down) down ;;
+  status) if is_up; then echo up; else echo down; fi ;;
+  *)
+    echo "usage: $0 up <pid> [<port>] | down | status" >&2
+    exit 64
+    ;;
+esac

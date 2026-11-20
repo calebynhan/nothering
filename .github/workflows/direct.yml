@@ -1,0 +1,106 @@
+name: Direct
+
+# Builds and tests this fork's direct link on a real Mac, which is the only place its Apple code
+# gets compiled, and on request publishes the builds as a release people can install from.
+
+on:
+  push:
+    branches: [direct-link]
+    # A tag direct-x.y.z publishes that version. A tag can be pushed from any branch, where the
+    # button below only shows once this file is on the default branch.
+    tags: ["direct-*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Publish a release with this version (x.y.z). Leave empty to only build and test."
+        required: false
+
+# The logs branch, and releases.
+permissions:
+  contents: write
+
+# A new push supersedes the run before it. A release is never cut short.
+concurrency:
+  group: direct-${{ github.ref }}-${{ inputs.version }}
+  cancel-in-progress: ${{ inputs.version == '' && github.ref_type != 'tag' }}
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      # Through the environment, not into the script text, since they end up in commands.
+      INPUT_VERSION: ${{ inputs.version }}
+      REF_TYPE: ${{ github.ref_type }}
+      REF_NAME: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # The whole history: the build number is the commit count.
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The version to release: the one typed in, or the one in the tag. Empty for a build that
+      # is only a check.
+      - name: Version
+        run: |
+          version=$INPUT_VERSION
+          if [[ -z $version && $REF_TYPE == tag ]]; then
+            version=${REF_NAME#direct-}
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      # Same pinned Tuist as ci.yml.
+      - name: Install Tuist
+        uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2
+
+      # Every step runs even after one failed, so one run shows every error.
+      - name: Build, test and package
+        run: scripts/ci/run.sh "$VERSION"
+
+      # A branch can be read with git alone, where a run's log needs a download.
+      - name: Publish the logs
+        if: always()
+        run: scripts/ci/publish-logs.sh build out
+
+      - name: Keep the builds and the full logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: direct-build
+          path: out/
+          if-no-files-found: warn
+
+      - name: Release
+        if: success() && env.VERSION != ''
+        run: scripts/ci/release.sh "$VERSION" out/release
+
+  offline-network:
+    name: Stand-in network on a real Mac
+    runs-on: macos-26
+    timeout-minutes: 15
+    # It takes the machine off the network for a moment to see what macOS makes of the stand-in.
+    # Whatever happens to it must not fail the build.
+    continue-on-error: true
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Probe
+        run: scripts/ci/probe-offline-network.sh out-probe
+
+      - name: Publish what it saw
+        if: always()
+        run: scripts/ci/publish-logs.sh probe out-probe
+
+      - name: Keep what it saw
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-network-probe
+          path: out-probe/
+          if-no-files-found: warn
