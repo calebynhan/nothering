@@ -404,11 +404,20 @@ struct WaitedTooLong: Error, CustomStringConvertible {
   var description: String {
     "\(what): nothing happened in \(seconds) s"
   }
+
+  /// Fails the test that waited, where it called the helper, whatever that test goes on to look
+  /// at: one that looks only at the data would otherwise pass with what came before the wait ran out.
+  static func record(_ error: Error?, at sourceLocation: SourceLocation) {
+    if let late = error as? WaitedTooLong { Issue.record(late, sourceLocation: sourceLocation) }
+  }
 }
 
 /// Writes `data` in `chunk`-sized writes, each after the one before completed, and returns the first error.
-private func write(_ data: Data, to stream: ByteStream, chunk: Int = 64 * 1024, thenEOF: Bool, on queue: DispatchQueue) async -> Error? {
-  await withCheckedContinuation { continuation in
+private func write(
+  _ data: Data, to stream: ByteStream, chunk: Int = 64 * 1024, thenEOF: Bool, on queue: DispatchQueue,
+  sourceLocation: SourceLocation = #_sourceLocation
+) async -> Error? {
+  let result: Error? = await withCheckedContinuation { continuation in
     queue.async {
       let waiting = Deadline<Error?>(on: queue, late: { WaitedTooLong(what: "writing \(data.count) bytes", seconds: $0) }) {
         continuation.resume(returning: $0)
@@ -429,10 +438,15 @@ private func write(_ data: Data, to stream: ByteStream, chunk: Int = 64 * 1024, 
       next()
     }
   }
+  WaitedTooLong.record(result, at: sourceLocation)
+  return result
 }
 
-private func readOnce(_ stream: ByteStream, minimum: Int, maximum: Int, on queue: DispatchQueue) async -> (data: Data?, isComplete: Bool, error: Error?) {
-  await withCheckedContinuation { continuation in
+private func readOnce(
+  _ stream: ByteStream, minimum: Int, maximum: Int, on queue: DispatchQueue,
+  sourceLocation: SourceLocation = #_sourceLocation
+) async -> (data: Data?, isComplete: Bool, error: Error?) {
+  let result: (data: Data?, isComplete: Bool, error: Error?) = await withCheckedContinuation { continuation in
     queue.async {
       let waiting = Deadline<(data: Data?, isComplete: Bool, error: Error?)>(
         on: queue, late: { (nil, false, WaitedTooLong(what: "reading \(minimum) bytes", seconds: $0)) }
@@ -442,11 +456,15 @@ private func readOnce(_ stream: ByteStream, minimum: Int, maximum: Int, on queue
       }
     }
   }
+  WaitedTooLong.record(result.error, at: sourceLocation)
+  return result
 }
 
 /// Reads until the stream ends or fails.
-private func readToEnd(_ stream: ByteStream, on queue: DispatchQueue) async -> (data: Data, error: Error?) {
-  await withCheckedContinuation { continuation in
+private func readToEnd(
+  _ stream: ByteStream, on queue: DispatchQueue, sourceLocation: SourceLocation = #_sourceLocation
+) async -> (data: Data, error: Error?) {
+  let result: (data: Data, error: Error?) = await withCheckedContinuation { continuation in
     queue.async {
       var received = Data()
       let waiting = Deadline<(data: Data, error: Error?)>(
@@ -464,6 +482,8 @@ private func readToEnd(_ stream: ByteStream, on queue: DispatchQueue) async -> (
       next()
     }
   }
+  WaitedTooLong.record(result.error, at: sourceLocation)
+  return result
 }
 
 /// The server writes on a stream the client is reading, as a relay always is, and ends the

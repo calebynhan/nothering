@@ -33,8 +33,9 @@ final class ExtensionController: NSObject {
   /// What was asked for last, on or off. A turn-on that is still waiting or saving gives way to a
   /// later off.
   private var isOnWanted = false
-  /// The last turn-on ended in an error, e.g. the person said no to macOS's question.
-  private var didLastTurnOnFail = false
+  /// The last turn-on couldn't save the configuration, most likely because the person said no to
+  /// macOS's question.
+  private var wasSaveRefused = false
   private var isRemoving = false
   private var propertiesRequest: ObjectIdentifier?
   private var isWatchingApproval = false
@@ -150,9 +151,10 @@ final class ExtensionController: NSObject {
   }
 
   /// Asks once more for a switch-on by hand that left capture off, e.g. one made while the Mac had
-  /// no network at all. Not after an error: a person who just said no isn't asked again by the app.
+  /// no network at all. Not after the configuration couldn't be saved: that is where macOS asks, and
+  /// a person who just said no isn't asked again by the app. A start that failed is tried again.
   func turnOnAgain() async {
-    guard !isRunning, !didLastTurnOnFail else { return }
+    guard !isRunning, !wasSaveRefused else { return }
     await turnOn()
   }
 
@@ -199,19 +201,32 @@ final class ExtensionController: NSObject {
   private func turnOnNow() async -> Bool {
     // Waiting for the saved configuration keeps an early turn-on from saving a duplicate one.
     await loading?.value
-    didLastTurnOnFail = false
+    wasSaveRefused = false
+    let manager: NETransparentProxyManager
     do {
-      let manager = try await configuredManager()
-      // Switched off while the configuration was being saved.
-      guard isOnWanted else { return false }
-      try manager.connection.startVPNTunnel()
-      try await setDNSProxyEnabled(true)
-      return true
+      manager = try await configuredManager()
     } catch {
       status = "Error: \(error.localizedDescription)"
-      didLastTurnOnFail = true
+      wasSaveRefused = true
       return false
     }
+    // Switched off while the configuration was being saved.
+    guard isOnWanted else { return false }
+    do {
+      try manager.connection.startVPNTunnel()
+      try await setDNSProxyEnabled(true)
+    } catch {
+      status = "Error: \(error.localizedDescription)"
+      return false
+    }
+    // Switched off while the DNS proxy's configuration was being saved: its save may have come
+    // before this one, so it is saved off once more, after it.
+    if !isOnWanted {
+      manager.connection.stopVPNTunnel()
+      try? await setDNSProxyEnabled(false)
+      return false
+    }
+    return true
   }
 
   private func load() async {
