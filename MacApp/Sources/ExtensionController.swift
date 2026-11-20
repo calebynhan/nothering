@@ -33,6 +33,8 @@ final class ExtensionController: NSObject {
   /// What was asked for last, on or off. A turn-on that is still waiting or saving gives way to a
   /// later off.
   private var isOnWanted = false
+  /// The last turn-on ended in an error, e.g. the person said no to macOS's question.
+  private var didLastTurnOnFail = false
   private var isRemoving = false
   private var propertiesRequest: ObjectIdentifier?
   private var isWatchingApproval = false
@@ -128,7 +130,30 @@ final class ExtensionController: NSObject {
   func turnOff() {
     isOnWanted = false
     manager?.connection.stopVPNTunnel()
+    if manager == nil {
+      // Asked before the saved configuration was loaded, e.g. by nothering://off opening the app:
+      // there was nothing to stop yet. Once it is there, unless on was asked for meanwhile.
+      Task {
+        await loading?.value
+        if !isOnWanted { manager?.connection.stopVPNTunnel() }
+      }
+    }
     Task { try? await setDNSProxyEnabled(false) }
+  }
+
+  /// The off of "Turn on and off with iPhone proxy": capture that is on, and a turn-on still under
+  /// way, which gives way to it. Nothing else: turnOff() saves the DNS proxy's configuration, and a
+  /// Mac that never had capture on would be asked to allow it.
+  func turnOffAutomatically() {
+    guard isRunning || turningOn != nil else { return }
+    turnOff()
+  }
+
+  /// Asks once more for a switch-on by hand that left capture off, e.g. one made while the Mac had
+  /// no network at all. Not after an error: a person who just said no isn't asked again by the app.
+  func turnOnAgain() async {
+    guard !isRunning, !didLastTurnOnFail else { return }
+    await turnOn()
   }
 
   /// A DNS proxy has no start/stop; it runs whenever its (system-wide, single) configuration is enabled.
@@ -174,6 +199,7 @@ final class ExtensionController: NSObject {
   private func turnOnNow() async -> Bool {
     // Waiting for the saved configuration keeps an early turn-on from saving a duplicate one.
     await loading?.value
+    didLastTurnOnFail = false
     do {
       let manager = try await configuredManager()
       // Switched off while the configuration was being saved.
@@ -183,6 +209,7 @@ final class ExtensionController: NSObject {
       return true
     } catch {
       status = "Error: \(error.localizedDescription)"
+      didLastTurnOnFail = true
       return false
     }
   }

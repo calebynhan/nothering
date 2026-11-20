@@ -58,6 +58,23 @@ final class Ending: @unchecked Sendable {
 }
 let ending = Ending()
 
+/// What to do when the direct link is there again: listen to the iPhone at once. Waiting for the
+/// keepalive would leave up to ten seconds in which a Stop tapped on the iPhone goes unheard, and
+/// the next keepalive would then wake the iPhone right back. Set once the tool listens.
+final class LinkIsBack: @unchecked Sendable {
+  private let lock = NSLock()
+  private var work: (@Sendable () -> Void)?
+
+  func set(_ work: @escaping @Sendable () -> Void) {
+    lock.withLock { self.work = work }
+  }
+
+  func run() {
+    lock.withLock { work }?()
+  }
+}
+let linkIsBack = LinkIsBack()
+
 var arguments = CommandLine.arguments.dropFirst().makeIterator()
 while let argument = arguments.next() {
   switch argument {
@@ -213,7 +230,9 @@ if via == "direct" {
   if !wasTyped {
     UserDefaults.standard.set(DirectLinkCode.format(linkCode), forKey: savedCodeKey)
   }
-  let client = DirectLinkClient(code: linkCode)
+  let client = DirectLinkClient(code: linkCode, onStatusChange: { status in
+    if status == .connected { linkIsBack.run() }
+  })
   client.start()
   if wakesPhone {
     let waker = DirectLinkWaker(code: linkCode)
@@ -378,6 +397,7 @@ func listenToPhone() {
   }
 }
 listenToPhone()
+linkIsBack.set { listenToPhone() }
 
 // iOS drops idle hotspot clients while the phone is locked, and the phone's app stops its proxy
 // once no client has connected for a while; periodic connects keep both alive.

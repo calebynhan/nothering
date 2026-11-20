@@ -50,7 +50,9 @@ if [ "${1:-}" = "--remove" ]; then
   stop_watcher
   rm -f "$AGENT" "$WATCHER"
   echo "Removing the helper needs an administrator's password."
-  sudo /bin/sh -c "'$HELPER' down; rm -f '$RULES' '$HELPER' /var/run/nothering-offline-network.lock"
+  # Down, and without waiting its turn if a call stuck for half a minute kept it from one: once the
+  # helper is gone, nothing could take the stand-in down any more.
+  sudo /bin/sh -c "'$HELPER' down || NOTHERING_OFFLINE_LOCKED=1 '$HELPER' down; rm -f '$RULES' '$HELPER' /var/run/nothering-offline-network.lock"
   echo "Car mode is removed."
   exit 0
 fi

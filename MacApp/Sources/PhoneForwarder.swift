@@ -212,6 +212,10 @@ final class PhoneForwarder {
   func captureChanged() {
     if !isCaptureOn() {
       captureWentOffAt = .now
+    } else if let lastSwitch, !lastSwitch.on, Date.now.timeIntervalSince(lastSwitch.at) >= Self.switchOffSettle {
+      // On again, and not by the switch, which last said off, e.g. in System Settings: that off
+      // is over, and capture that macOS stops and starts gets its grace like any other.
+      self.lastSwitch = nil
     }
     refreshLink()
   }

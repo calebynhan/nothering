@@ -79,6 +79,9 @@ import Testing
     #expect(OfflineNetwork.removeCommands.hasPrefix("PATH=\(OfflineNetwork.systemPath); export PATH; "))
     // The lock goes with the rest.
     #expect(OfflineNetwork.removeCommands.hasSuffix("'\(OfflineNetwork.lockPath)'"))
+    // And the stand-in goes before the helper, even if a stuck call keeps "down" from its turn.
+    #expect(OfflineNetwork.removeCommands.contains("; \(OfflineNetwork.downEvenIfStuck); rm -f "))
+    #expect(OfflineNetwork.downEvenIfStuck.contains(" || NOTHERING_OFFLINE_LOCKED=1 "))
   }
 
   /// The install commands as root runs them, with the system's places moved under a temporary

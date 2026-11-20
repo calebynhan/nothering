@@ -111,7 +111,12 @@ public enum OfflineNetwork {
 
   /// Takes the network down and removes what `installCommands` put in place. To be run as root.
   public static let removeCommands =
-    "PATH=\(systemPath); export PATH; '\(helperPath)' down; rm -f '\(sudoersPath)' '\(helperPath)' '\(lockPath)'"
+    "PATH=\(systemPath); export PATH; \(downEvenIfStuck); rm -f '\(sudoersPath)' '\(helperPath)' '\(lockPath)'"
+
+  /// The helper's "down", and if it couldn't have its turn, which only a call stuck for half a
+  /// minute would keep it from, "down" without waiting: once the helper is removed, nothing could
+  /// take the stand-in down any more.
+  static let downEvenIfStuck = "'\(helperPath)' down || NOTHERING_OFFLINE_LOCKED=1 '\(helperPath)' down"
 
   /// Installs the helper from an app, with the system's dialog for an administrator's password.
   public static func installWithPasswordDialog() throws {
@@ -179,6 +184,12 @@ public enum OfflineNetwork {
           export NOTHERING_OFFLINE_LOCKED
           # Root's alone: whoever can open the lock file can hold the lock.
           umask 077
+          # A watcher's end waits as long as it takes. Giving up would leave the stand-in up with
+          # nothing left to take it down. While it waits it is still the watcher on file, so "down"
+          # can end it.
+          if [ "$1" = expire ]; then
+            exec lockf -k "$LOCK_FILE" /bin/sh "$0" "$@"
+          fi
           exec lockf -k -t 30 "$LOCK_FILE" /bin/sh "$0" "$@"
         fi
         ;;

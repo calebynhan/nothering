@@ -317,6 +317,24 @@ else
   echo "  skipped: no lockf and no flock on this machine, so the helper goes without its lock"
 fi
 
+echo "The helper: waiting its turn"
+check "a watcher's end waits as long as it takes, other calls half a minute" 'grep -q "^      if \[ \"\$1\" = expire \]; then\$" "$here/offline-network.sh" && grep -q "^        exec lockf -k \"\$LOCK_FILE\" /bin/sh \"\$0\" \"\$@\"\$" "$here/offline-network.sh" && grep -q "^      exec lockf -k -t 30 \"\$LOCK_FILE\" /bin/sh \"\$0\" \"\$@\"\$" "$here/offline-network.sh"'
+if [ -n "$locks" ]; then
+  reset; sleeper; owner=$sleeper_pid
+  helper up "$owner"
+  # Someone else holds the lock while the owner ends: the watcher waits, then takes it all down.
+  locker=$(command -v lockf || echo "$bin/lockf")
+  "$locker" -k -t 5 "$work/run/nothering-offline-network.lock" sleep 8 &
+  holder=$!
+  sleep 1
+  kill "$owner"; wait "$owner" 2>/dev/null
+  sleep 4
+  check "while another call has the lock, the stand-in stays" '[ -e "$state/if-feth5478" ]'
+  wait "$holder"
+  sleep 3
+  check "once that call is done, the watcher takes it down" none_left
+fi
+
 echo "The helper: a watcher's end is for the stand-in it was started for"
 reset; sleeper; owner=$sleeper_pid
 helper up "$owner"

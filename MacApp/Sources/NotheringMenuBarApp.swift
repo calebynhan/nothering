@@ -20,8 +20,9 @@ struct NotheringMenuBarApp: App {
       Task {
         if isReachable {
           await controller?.turnOnAutomatically()
-        } else if controller?.isRunning == true {
-          controller?.turnOff()
+        } else {
+          // Also a turn-on still under way, which would otherwise start capture after this.
+          controller?.turnOffAutomatically()
         }
       }
     }
@@ -31,8 +32,8 @@ struct NotheringMenuBarApp: App {
       Task {
         if !byHand {
           await controller?.turnOnAutomatically()
-        } else if controller?.isRunning == false {
-          await controller?.turnOn()
+        } else {
+          await controller?.turnOnAgain()
         }
       }
     }
