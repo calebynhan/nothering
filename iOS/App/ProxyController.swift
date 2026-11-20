@@ -207,7 +207,7 @@ final class ProxyController {
   /// certain after Bluetooth was off, and when a change in Settings shows.
   func cameToFront() {
     isInFront = true
-    if isMacWaiting, Date.now.timeIntervalSince(lastWokenAt) < Self.macSilenceEndsWait {
+    if isMacWaiting, 0...Self.macSilenceEndsWait ~= Date.now.timeIntervalSince(lastWokenAt) {
       // Asked to open the app for a Mac, and here it is: that is asking for the proxy, whatever
       // "Start when opened" says. The view starts it, after a proxy left on had its turn.
       wasOpenedForMac = true
@@ -339,7 +339,8 @@ final class ProxyController {
 
   /// A paired Mac asked for the proxy over Bluetooth, so nobody has to pick up the iPhone.
   func startBecauseWoken() async {
-    if Date.now.timeIntervalSince(lastWokenAt) > Self.macSilenceEndsWait {
+    // A saved time later than now, after the clock was set back, is as stale as an old one.
+    if !(0...Self.macSilenceEndsWait ~= Date.now.timeIntervalSince(lastWokenAt)) {
       isMacWaiting = false
     }
     lastWokenAt = .now
@@ -521,6 +522,7 @@ final class ProxyController {
     startedAt = nil
     directLinkProblem = nil
     answerPairing(false)
+    pairingOpenUntil = .distantPast
     macAskedAt = nil
     isSessionNew = false
     isRunning = false
@@ -596,23 +598,32 @@ final class ProxyController {
       waitForMacIsOver()
     }
     // A Mac got through. Only a new connection says so: a link stays counted for a while after
-    // its last one.
+    // its last one. That ends a wait for it too, also one that began while the link it had lost
+    // was still counted.
     if gotConnection, !macLinks.isEmpty {
       macAskedAt = nil
+      if isMacWaiting { waitForMacIsOver() }
     }
     // Keeping the silent audio running with no client drains the battery, so turn off once the last Mac leaves.
     if hadLinks, macLinks.isEmpty {
-      guard let macAskedAt, Date.now.timeIntervalSince(macAskedAt) < Self.wokenWithoutMacTimeout else {
+      if pairingOpenUntil > .now {
+        // Unless the person is pairing another Mac, which needs it. From here it waits like a
+        // proxy that opening the app started.
+        hadMacLink = false
+        waitsAsOpened()
+      } else if let macAskedAt, Date.now.timeIntervalSince(macAskedAt) < Self.wokenWithoutMacTimeout {
+        // Or a Mac asked for it since that one went, over Bluetooth. From here it waits for that
+        // Mac like a proxy its request had started, counted from the request.
+        hadMacLink = false
+        startReason = .woken
+        wasStartedByWake = true
+        wasStartedByOpening = false
+        waitingSince = macAskedAt
+      } else {
         stop()
         return
       }
-      // Unless a Mac asked for it since that one went, over Bluetooth. From here it waits for that
-      // Mac like a proxy its request had started.
-      hadMacLink = false
-      startReason = .woken
-      wasStartedByWake = true
-      wasStartedByOpening = false
-      waitingSince = .now
+      // Either way it is no longer one the person left on, to come back after iOS ended the app.
       UserDefaults.standard.set(false, forKey: Self.wasRunningKey)
     }
     if let macAskedAt, !didAskToOpen, Date.now.timeIntervalSince(macAskedAt) > Self.askToOpenAfter {

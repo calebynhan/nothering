@@ -27,9 +27,16 @@ final class ExtensionController: NSObject {
   @ObservationIgnored var onRunningChange: (@MainActor () -> Void)?
   private var manager: NETransparentProxyManager?
   private var loading: Task<Void, Never>?
-  /// The turn-on under way, for whoever asks for one meanwhile. Its value says whether it went
-  /// through without an error.
-  private var turningOn: Task<Bool, Never>?
+  /// The turn-on under way, for whoever asks for one meanwhile. Its value says how it ended.
+  private var turningOn: Task<TurnOnResult, Never>?
+  private enum TurnOnResult {
+    /// Capture was started without an error.
+    case started
+    /// It stopped at an error.
+    case failed
+    /// Off was asked for while it was under way, and it gave way to that.
+    case gaveWay
+  }
   /// What was asked for last, on or off. A turn-on that is still waiting or saving gives way to a
   /// later off.
   private var isOnWanted = false
@@ -167,7 +174,13 @@ final class ExtensionController: NSObject {
     manager.providerProtocol = configuration
     manager.localizedDescription = "Nothering DNS"
     manager.isEnabled = enabled
-    try await manager.saveToPreferences()
+    do {
+      try await manager.saveToPreferences()
+    } catch {
+      // Saving it on is where macOS asks, as for the proxy's configuration.
+      if enabled { wasSaveRefused = true }
+      throw error
+    }
   }
 
   /// Turns capture on for the auto turn-on option. Skipped until the user has turned it on by hand once,
@@ -180,25 +193,26 @@ final class ExtensionController: NSObject {
 
   /// One at a time. Capture only shows as on once it has started, so a second request can come
   /// while the first is still saving the configuration, and two that save at once leave two
-  /// configurations. A request that finds one under way waits for it, and goes itself only if that
-  /// one went through and still left capture off.
+  /// configurations. A request that finds one under way waits for it. It goes itself if that one
+  /// gave way to an off that came before this request, or went through and still left capture off,
+  /// and not after an error.
   func turnOn() async {
     isOnWanted = true
     while let turningOn {
-      let wentThrough = await turningOn.value
-      if isRunning || !wentThrough || !isOnWanted { return }
+      let result = await turningOn.value
+      if result == .failed || !isOnWanted { return }
+      if result == .started, isRunning { return }
     }
-    let task = Task<Bool, Never> {
-      let wentThrough = await turnOnNow()
+    let task = Task<TurnOnResult, Never> {
+      let result = await turnOnNow()
       turningOn = nil
-      return wentThrough
+      return result
     }
     turningOn = task
     _ = await task.value
   }
 
-  /// Returns whether capture was started without an error.
-  private func turnOnNow() async -> Bool {
+  private func turnOnNow() async -> TurnOnResult {
     // Waiting for the saved configuration keeps an early turn-on from saving a duplicate one.
     await loading?.value
     wasSaveRefused = false
@@ -207,26 +221,25 @@ final class ExtensionController: NSObject {
       manager = try await configuredManager()
     } catch {
       status = "Error: \(error.localizedDescription)"
-      wasSaveRefused = true
-      return false
+      return .failed
     }
     // Switched off while the configuration was being saved.
-    guard isOnWanted else { return false }
+    guard isOnWanted else { return .gaveWay }
     do {
       try manager.connection.startVPNTunnel()
       try await setDNSProxyEnabled(true)
     } catch {
       status = "Error: \(error.localizedDescription)"
-      return false
+      return .failed
     }
     // Switched off while the DNS proxy's configuration was being saved: its save may have come
     // before this one, so it is saved off once more, after it.
     if !isOnWanted {
       manager.connection.stopVPNTunnel()
       try? await setDNSProxyEnabled(false)
-      return false
+      return .gaveWay
     }
-    return true
+    return .started
   }
 
   private func load() async {
@@ -250,9 +263,15 @@ final class ExtensionController: NSObject {
     manager.protocolConfiguration = configuration
     manager.localizedDescription = "Nothering"
     manager.isEnabled = true
-    try await manager.saveToPreferences()
-    try await manager.loadFromPreferences()
+    do {
+      try await manager.saveToPreferences()
+    } catch {
+      wasSaveRefused = true
+      throw error
+    }
+    // Saved, so it is the one to use from here, also if loading it back fails.
     self.manager = manager
+    try await manager.loadFromPreferences()
     return manager
   }
 
