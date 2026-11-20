@@ -3,12 +3,15 @@ import ProxyCore
 import SwiftUI
 
 struct ContentView: View {
-  @State private var controller = ProxyController()
+  @State private var controller = ProxyController.shared
   @Environment(\.scenePhase) private var scenePhase
   @Environment(\.openURL) private var openURL
   @AppStorage(TerminationAlert.enabledKey) private var notifiesOnTermination = false
   @AppStorage(FocusSound.storageKey) private var focusSound = FocusSound.off
+  /// On unless turned off: opening the app is then all it takes for the Mac to connect.
+  @AppStorage("startsWhenOpened") private var startsWhenOpened = true
   @State private var showingFocusGuide = false
+  @State private var confirmingNewCode = false
 
   private var notifiesOnTerminationBinding: Binding<Bool> {
     Binding(
@@ -50,6 +53,12 @@ struct ContentView: View {
           Text("Working from a cafe, a client's office or a job site? Ambient noise masks the chatter around you so you can focus. It plays while the proxy is on, including when Nothering is in the background or the iPhone is locked.")
         }
 
+        Section {
+          Toggle("Start when opened", isOn: $startsWhenOpened)
+        } footer: {
+          Text("Opening Nothering starts the proxy, so there is nothing to tap. A paired Mac can also start it over Bluetooth when you switch Nothering on there, without this iPhone being touched, as long as Nothering wasn't swiped away here. A proxy started either way stops by itself when no Mac connects.")
+        }
+
         Section("Throughput") {
           ThroughputView(samples: controller.samples, isRunning: controller.isRunning)
         }
@@ -67,10 +76,39 @@ struct ContentView: View {
 
         Section {
           LabeledContent("SOCKS5 port", value: "11080")
+          LabeledContent("Pairing code") {
+            // Five groups of four: smaller than the rows around it, so it stays on one line.
+            Text(controller.directLinkCode)
+              .font(.footnote)
+              .monospaced()
+              .lineLimit(1)
+              .minimumScaleFactor(0.7)
+              .textSelection(.enabled)
+          }
+          if let problem = controller.directLinkProblem {
+            Label(problem, systemImage: "exclamationmark.triangle.fill")
+              .font(.footnote)
+              .foregroundStyle(.orange)
+          }
+          if controller.isWakeDenied {
+            Label("Bluetooth is off for Nothering, so your Mac can't start the proxy by itself. Allow it in Settings > Privacy & Security > Bluetooth.", systemImage: "exclamationmark.triangle.fill")
+              .font(.footnote)
+              .foregroundStyle(.orange)
+          }
+          Button("New Pairing Code…") { confirmingNewCode = true }
+            .confirmationDialog(
+              "Macs you paired stop working with this iPhone until you pair them again.",
+              isPresented: $confirmingNewCode,
+              titleVisibility: .visible
+            ) {
+              Button("New Pairing Code", role: .destructive) {
+                Task { await controller.newPairingCode() }
+              }
+            }
         } header: {
           Text("Connect from Mac")
         } footer: {
-          Text("Connect your Mac with a USB cable or join this iPhone's Personal Hotspot, then turn on Nothering in the Mac menu bar app.")
+          Text("Connect your Mac with a USB cable or join this iPhone's Personal Hotspot, then turn on Nothering in the Mac menu bar app. With no cable and no hotspot, choose Direct on the Mac while this screen is open: this iPhone then asks once whether to allow that Mac. The pairing code is only for typing into the Mac if that doesn't work. Wi-Fi has to be on, on the iPhone and the Mac, joined to a network or not.")
         }
 
         Section("Traffic") {
@@ -121,8 +159,11 @@ struct ContentView: View {
         Text("Do Not Disturb and other Focus modes silence this notification. To get it anyway, open Focus in Settings, choose a Focus, and tap Apps. Add Nothering under Allow Notifications From, or remove it if the Focus uses Silence Notifications From.")
       }
       .task {
+        if scenePhase == .active { controller.cameToFront() }
         if CommandLine.arguments.contains("--autostart") || controller.shouldRestore, !controller.isRunning {
           await controller.start()
+        } else if startsWhenOpened {
+          await controller.startBecauseOpened()
         }
       }
       .onChange(of: focusSound) { _, sound in
@@ -131,8 +172,25 @@ struct ContentView: View {
       .onChange(of: scenePhase) { _, phase in
         if phase == .active {
           controller.resumeKeeper()
+          controller.cameToFront()
+          if startsWhenOpened {
+            Task { await controller.startBecauseOpened() }
+          }
+        } else if phase == .background {
+          controller.didEnterBackground()
         }
       }
+    }
+    // On the stack, not the list: the list already has an alert of its own.
+    .alert(
+      "Allow this Mac?",
+      isPresented: Binding(get: { controller.pairingPrompt != nil }, set: { if !$0 { controller.answerPairing(false) } }),
+      presenting: controller.pairingPrompt
+    ) { _ in
+      Button("Allow") { controller.answerPairing(true) }
+      Button("Don't Allow", role: .cancel) { controller.answerPairing(false) }
+    } message: { prompt in
+      Text("\(prompt.name) wants to use this iPhone's connection over Wi-Fi. Allow it only if your Mac shows \(prompt.digits).")
     }
   }
 }
@@ -287,7 +345,9 @@ private struct MacLinkLabel: View {
   }
 
   private var content: (title: LocalizedStringKey, symbol: String) {
-    switch (links.contains(.usb), links.contains(.hotspot)) {
+    // The direct link is chosen on the Mac instead of the other two, so it shows alone.
+    if links == [.direct] { return ("Mac connected via direct Wi-Fi", "wifi") }
+    return switch (links.contains(.usb), links.contains(.hotspot)) {
     case (true, true): ("Mac connected via USB and Hotspot", "laptopcomputer.and.iphone")
     case (true, false): ("Mac connected via USB", "cable.connector")
     case (false, true): ("Mac connected via Personal Hotspot", "personalhotspot")

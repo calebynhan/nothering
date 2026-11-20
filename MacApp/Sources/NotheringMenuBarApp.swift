@@ -25,11 +25,13 @@ struct NotheringMenuBarApp: App {
         }
       }
     }
+    forwarder.isCaptureOn = { [weak controller] in controller?.isRunning ?? false }
     forwarder.start()
     _forwarder = State(initialValue: forwarder)
     controller.checkExtension()
     _controller = State(initialValue: controller)
     AppDelegate.controller = controller
+    AppDelegate.forwarder = forwarder
   }
 
   var body: some Scene {
@@ -87,13 +89,18 @@ struct NotheringMenuBarApp: App {
 /// Handles `nothering://on` and `nothering://off`, e.g. for scripts that must turn capture off.
 final class AppDelegate: NSObject, NSApplicationDelegate {
   @MainActor static var controller: ExtensionController?
+  @MainActor static var forwarder: PhoneForwarder?
 
   func application(_ application: NSApplication, open urls: [URL]) {
     for url in urls where url.scheme == "nothering" {
       Task { @MainActor in
         switch url.host {
-        case "on": await Self.controller?.turnOn()
-        case "off": Self.controller?.turnOff()
+        case "on":
+          Self.forwarder?.captureSwitched(on: true)
+          await Self.controller?.turnOn()
+        case "off":
+          Self.forwarder?.captureSwitched(on: false)
+          Self.controller?.turnOff()
         default: break
         }
       }

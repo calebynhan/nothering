@@ -12,15 +12,27 @@ public final class ProxyServer {
     public var requiredInterfaceType: NWInterface.InterfaceType?
     /// Decides by the name of the local interface a client connected through (e.g. `bridge100`).
     public var isInterfaceAllowed: (String) -> Bool
+    /// The pairing code for the direct Wi-Fi link (see `DirectLink`). `nil` leaves the link off, so
+    /// the Mac needs a cable or the hotspot.
+    public var directLinkCode: String?
+    /// Lets a Mac get that code by asking, see `DirectLinkPairing`. Called, on no particular
+    /// thread, with a request to put to the person, and with `nil` when the request it last got is
+    /// over without an answer. `nil` here means a Mac can only be paired by typing the code. A Mac
+    /// can only ask while `setAcceptsPairing` says so.
+    public var onPairingRequest: (@Sendable (DirectLinkPairingRequest?) -> Void)?
 
     public init(
       port: NWEndpoint.Port = 11080,
       requiredInterfaceType: NWInterface.InterfaceType? = .cellular,
-      isInterfaceAllowed: @escaping (String) -> Bool = ProxyServer.isHotspotOrLoopbackInterface
+      isInterfaceAllowed: @escaping (String) -> Bool = ProxyServer.isHotspotOrLoopbackInterface,
+      directLinkCode: String? = nil,
+      onPairingRequest: (@Sendable (DirectLinkPairingRequest?) -> Void)? = nil
     ) {
       self.port = port
       self.requiredInterfaceType = requiredInterfaceType
       self.isInterfaceAllowed = isInterfaceAllowed
+      self.directLinkCode = directLinkCode
+      self.onPairingRequest = onPairingRequest
     }
   }
 
@@ -34,15 +46,19 @@ public final class ProxyServer {
     public var totalUSBConnections = 0
     public var activeHotspotConnections = 0
     public var totalHotspotConnections = 0
+    public var activeDirectConnections = 0
+    public var totalDirectConnections = 0
 
     public init() {}
   }
 
   /// The link a client came over: usbmux delivers USB connections on loopback, and Personal
-  /// Hotspot clients arrive on a `bridge*` interface.
+  /// Hotspot clients arrive on a `bridge*` interface. The direct Wi-Fi link has no interface of its
+  /// own to tell by: its clients are streams of one connection, see `DirectLinkListener`.
   public enum Link: Sendable {
     case usb
     case hotspot
+    case direct
 
     public init?(interface: String) {
       if interface == "lo0" {
@@ -67,6 +83,12 @@ public final class ProxyServer {
   let queue = DispatchQueue(label: "app.nothering.proxy")
   let logger = Logger(subsystem: "app.nothering", category: "proxy")
   private var listener: SocketListener?
+  private var directListener: DirectLinkListener?
+  private var pairingListener: DirectLinkPairingListener?
+  private var isStarted = false
+  private var acceptsPairing = false
+  /// Why the direct link couldn't be advertised at all. A problem that comes up later is the listener's.
+  private var directLinkStartError: String?
   private var sessions: [ObjectIdentifier: (session: Session, link: Link?)] = [:]
   private var stats = Stats()
 
@@ -83,6 +105,7 @@ public final class ProxyServer {
       }
       self.listener = listener
       logger.info("listening on port \(listener.port)")
+      startDirectLink()
       return NWEndpoint.Port(rawValue: listener.port)!
     } catch {
       throw StartError(underlying: error)
@@ -91,12 +114,74 @@ public final class ProxyServer {
 
   public func stop() {
     queue.sync {
+      isStarted = false
       listener?.cancel()
       listener = nil
       for entry in sessions.values {
         entry.session.close()
       }
       sessions.removeAll()
+      directListener?.cancel()
+      directListener = nil
+      pairingListener?.cancel()
+      pairingListener = nil
+    }
+  }
+
+  /// Why the Mac can't use the direct Wi-Fi link right now, e.g. Local Network access is off.
+  /// `nil` when the link is advertised, or off.
+  public func directLinkProblem() -> String? {
+    queue.sync { directLinkStartError ?? directListener?.problem }
+  }
+
+  /// Where the direct link and pairing listen, once they do, for tests that connect by hand.
+  func directLinkPorts() -> (link: UInt16?, pairing: UInt16?) {
+    queue.sync { (directListener?.port, pairingListener?.port) }
+  }
+
+  /// Whether a Mac may ask to be paired right now. The app says yes while the person has it in
+  /// front of them: the question is theirs to answer, and what leads to it can come from anyone in
+  /// range, before any key is shared.
+  public func setAcceptsPairing(_ accepts: Bool) {
+    queue.async { [self] in
+      acceptsPairing = accepts
+      updatePairing()
+    }
+  }
+
+  /// The direct link is an extra: when it can't start, cable and hotspot clients are still served.
+  private func startDirectLink() {
+    queue.sync {
+      isStarted = true
+      guard let code = configuration.directLinkCode, DirectLinkCode.isValid(code) else { return }
+      do {
+        directListener = try DirectLinkListener(code: code, queue: queue) { [weak self] stream in
+          self?.accept(stream)
+        }
+        directLinkStartError = nil
+      } catch {
+        logger.error("direct link failed to start: \(error.localizedDescription, privacy: .public)")
+        directLinkStartError = error.localizedDescription
+      }
+      updatePairing()
+    }
+  }
+
+  /// Starts or ends pairing as `acceptsPairing` says. On `queue`.
+  private func updatePairing() {
+    guard isStarted, acceptsPairing, let code = configuration.directLinkCode, DirectLinkCode.isValid(code),
+          let onPairingRequest = configuration.onPairingRequest
+    else {
+      pairingListener?.cancel()
+      pairingListener = nil
+      return
+    }
+    guard pairingListener == nil else { return }
+    // Pairing only hands out the code, so without it a Mac can still be given the code by hand.
+    do {
+      pairingListener = try DirectLinkPairingListener(code: code, queue: queue, onRequest: onPairingRequest)
+    } catch {
+      logger.error("pairing failed to start: \(error.localizedDescription, privacy: .public)")
     }
   }
 
@@ -104,8 +189,10 @@ public final class ProxyServer {
     queue.sync { stats }
   }
 
-  /// Tells every client listening for events. The write happens before this returns, so the event
-  /// still goes out when the process exits or `stop` closes the connections right after.
+  /// Tells every client listening for events. For a cable or hotspot client the write happens
+  /// before this returns, so the event still goes out when the process exits or `stop` closes the
+  /// connections right after. On the direct link it is only handed over, and `stop` waits for it
+  /// to go out, see `Mux.closeAfterFlush`.
   public func send(_ event: ProxyEvent) {
     queue.sync {
       for entry in sessions.values {
@@ -122,7 +209,18 @@ public final class ProxyServer {
     }
     logger.info("accepted client on interface \(interface, privacy: .public)")
     let session = Session(client: SocketStream(fd: fd, queue: queue), server: self)
-    let link = Link(interface: interface)
+    register(session, link: Link(interface: interface))
+    session.start()
+  }
+
+  /// A stream the Mac opened on the direct link. The pairing code already let that Mac in.
+  private func accept(_ stream: MuxStream) {
+    let session = Session(client: stream, server: self)
+    register(session, link: .direct)
+    session.start()
+  }
+
+  private func register(_ session: Session, link: Link?) {
     sessions[ObjectIdentifier(session)] = (session, link)
     stats.activeConnections += 1
     stats.totalConnections += 1
@@ -133,10 +231,12 @@ public final class ProxyServer {
     case .hotspot:
       stats.activeHotspotConnections += 1
       stats.totalHotspotConnections += 1
+    case .direct:
+      stats.activeDirectConnections += 1
+      stats.totalDirectConnections += 1
     case nil:
       break
     }
-    session.start()
   }
 
   // MARK: Session callbacks (always on `queue`)
@@ -149,6 +249,8 @@ public final class ProxyServer {
       stats.activeUSBConnections -= 1
     case .hotspot:
       stats.activeHotspotConnections -= 1
+    case .direct:
+      stats.activeDirectConnections -= 1
     case nil:
       break
     }

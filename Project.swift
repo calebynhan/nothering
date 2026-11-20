@@ -42,8 +42,20 @@ let hardenedRuntime: SettingsDictionary = ["ENABLE_HARDENED_RUNTIME": "YES"]
 // Static frameworks are linked into the apps and never signed on their own.
 let unsigned: SettingsDictionary = ["CODE_SIGNING_ALLOWED": "NO"]
 
+// The direct Wi-Fi link (see DirectLink): the iPhone advertises these services and the Mac looks for them, the
+// second one while pairing (see DirectLinkPairing). A service missing here is never found, without an error.
+let directLinkService: Plist.Value = ["_nothering._tcp", "_nothering-pair._tcp"]
+
 let localNetworkUsage: [String: Plist.Value] = [
-  "NSLocalNetworkUsageDescription": "Nothering accepts proxy connections from devices on your Personal Hotspot.",
+  "NSLocalNetworkUsageDescription": "Nothering accepts proxy connections from your Mac, over your Personal Hotspot or directly over Wi-Fi.",
+  "NSBonjourServices": directLinkService,
+]
+
+let macLocalNetworkUsage: [String: Plist.Value] = [
+  "NSLocalNetworkUsageDescription": "Nothering finds your iPhone over Wi-Fi when you connect it without a cable or a hotspot.",
+  "NSBonjourServices": directLinkService,
+  // The Bluetooth wake, see DirectLinkWake.
+  "NSBluetoothAlwaysUsageDescription": "Nothering asks your iPhone over Bluetooth to start its proxy, so you don't have to pick it up.",
 ]
 
 // Sparkle reads the newest release's appcast.xml, attached to every GitHub Release by fastlane.
@@ -88,7 +100,9 @@ let project = Project(
       infoPlist: .extendingDefault(with: version.merging(localNetworkUsage) { $1 }.merging([
         "CFBundleDisplayName": "Nothering",
         "UILaunchScreen": [:],
-        "UIBackgroundModes": ["audio"],
+        // bluetooth-peripheral keeps the Mac's wake reachable while the app is suspended, see DirectLinkWake.
+        "UIBackgroundModes": ["audio", "bluetooth-peripheral"],
+        "NSBluetoothAlwaysUsageDescription": "Nothering lets your paired Mac start the proxy over Bluetooth, so you don't have to pick up this iPhone.",
         "ITSAppUsesNonExemptEncryption": false,
       ]) { $1 }),
       sources: ["iOS/App/**"],
@@ -121,7 +135,7 @@ let project = Project(
       productName: "nothering",
       bundleId: "\(bundleIDPrefix).cli",
       deploymentTargets: .macOS("15.0"),
-      infoPlist: .extendingDefault(with: version),
+      infoPlist: .extendingDefault(with: version.merging(macLocalNetworkUsage) { $1 }),
       sources: ["Mac/Sources/**"],
       dependencies: [.target(name: "ProxyCore"), .target(name: "PhoneLink")],
       settings: .settings(base: hardenedRuntime)
@@ -139,7 +153,7 @@ let project = Project(
         // The app copies itself to /Applications under this name, so each configuration installs side by side.
         "NotheringInstallName": "$(INSTALL_NAME)",
         "CFBundleURLTypes": [["CFBundleURLName": "$(PRODUCT_BUNDLE_IDENTIFIER)", "CFBundleURLSchemes": ["nothering"]]],
-      ]) { $1 }.merging(sparkle) { $1 }),
+      ]) { $1 }.merging(sparkle) { $1 }.merging(macLocalNetworkUsage) { $1 }),
       sources: ["MacApp/Sources/**"],
       resources: .resources(["MacApp/Resources/**"] + appIcons),
       entitlements: "MacApp/App.entitlements",

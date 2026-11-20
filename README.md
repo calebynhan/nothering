@@ -16,24 +16,31 @@
 
 ---
 
+> [!NOTE]
+> **This is a fork** of [devxoul/nothering](https://github.com/devxoul/nothering). It adds the **direct link**: the Mac uses the iPhone's connection with **no Personal Hotspot, no cable and no Wi-Fi network** to join, for instance in a car. The Mac starts the iPhone's app over Bluetooth, so the iPhone stays in the pocket, and neither side needs a paid developer account or a weekly reinstall.
+>
+> **[Install it →](docs/direct-link.md#install)** &nbsp;·&nbsp; [What has and hasn't been run](docs/direct-link.md#what-has-and-hasnt-been-run): it has not run on an iPhone yet.
+>
+> The badges above are the original's. Its iPhone app has no direct link.
+
 ## What it does
 
 The iPhone runs a small **SOCKS5 proxy**, and every connection your Mac makes is **re-opened from the iPhone's own network stack** over cellular.
 
-On the Mac, a **transparent proxy system extension** captures app traffic (TCP, UDP and DNS) and sends it to the phone over **USB** or the **Personal Hotspot** link. No per-app proxy settings needed.
+On the Mac, a **transparent proxy system extension** captures app traffic (TCP, UDP and DNS) and sends it to the phone over **USB**, the **Personal Hotspot** link, or **directly over Wi-Fi** with no hotspot and no cable. No per-app proxy settings needed.
 
 ## How it works
 
 ```mermaid
 flowchart LR
-  M["💻 Mac"] -->|USB or Hotspot| P["📱 iPhone"]
+  M["💻 Mac"] -->|USB, Hotspot or Direct| P["📱 iPhone"]
   P -->|cellular| I(("🌐 Internet"))
 ```
 
 | Piece | Role |
 |---|---|
-| **iPhone app** | SOCKS5 server (CONNECT + framed UDP) on port `11080`. Accepts clients only from loopback and hotspot (`bridge*`) interfaces, and pins outbound connections to cellular. Plays silent audio to stay alive in the background. |
-| **Mac menu bar app** | Owns the link to the phone — prefers USB, falls back to the hotspot gateway — and serves it on `127.0.0.1:11080`. Installs and toggles the extension. |
+| **iPhone app** | SOCKS5 server (CONNECT + framed UDP) on port `11080`. Accepts clients only from loopback and hotspot (`bridge*`) interfaces, plus a Mac paired for the direct link, and pins outbound connections to cellular. Plays silent audio to stay alive in the background. |
+| **Mac menu bar app** | Owns the link to the phone — prefers USB, falls back to the hotspot gateway, or uses the direct link when chosen — and serves it on `127.0.0.1:11080`. Installs and toggles the extension. |
 | **Mac proxy extension** | `NETransparentProxyProvider` + `NEDNSProxyProvider`. Relays outbound flows via SOCKS5; resolves public DNS over TCP through the phone. |
 | **`nothering` CLI** | Minimal alternative to the menu bar app: a local SOCKS5 forwarder, optionally set as the system SOCKS proxy. |
 
@@ -49,8 +56,8 @@ Nothering fails open — your Mac keeps working when the phone isn't around.
 
 ### Install
 
-- **iPhone** — join the [TestFlight beta](https://testflight.apple.com/join/GYV2fdtp).
-- **Mac** — download the app and CLI from [GitHub Releases](../../releases).
+- **With the direct link** — see [`docs/direct-link.md`](docs/direct-link.md#install): this fork's iPhone app through SideStore, and its `nothering` tool on the Mac.
+- **The original, with a cable or the hotspot** — the iPhone app from the [App Store](https://apps.apple.com/app/nothering/id6817766239), the Mac app and CLI from the [original's releases](https://github.com/devxoul/nothering/releases/latest).
 
 ### Requirements
 
@@ -98,26 +105,53 @@ Published releases go through the **Release** GitHub Actions workflow (`gh workf
 ### Use
 
 1. **iPhone** — open Nothering and tap **Start Proxy**.
-2. **Connect** the Mac by USB cable or join the iPhone's Personal Hotspot.
+2. **Connect** the Mac by USB cable or join the iPhone's Personal Hotspot. With neither, use the [direct link](#direct-link-no-hotspot-no-cable).
 3. **Mac** — launch the menu bar app. It copies itself to `/Applications` (required for system extensions) and asks to install the extension; approve it in **System Settings → General → Login Items & Extensions**.
 4. Flip the switch in the menu bar panel. The icon lights up while traffic is captured.
 
 <img src="MacApp/Resources/Assets.xcassets/MenuBarIcon.imageset/MenuBarIcon@2x.png" width="18" alt=""> on &nbsp;·&nbsp; <img src="MacApp/Resources/Assets.xcassets/MenuBarIconOff.imageset/MenuBarIconOff@2x.png" width="18" alt=""> off
 
-The panel shows the active link, traffic counters, and lets you force **USB** or **Hotspot**. Scripts can toggle capture with URLs:
+The panel shows the active link, traffic counters, and lets you force **USB**, **Hotspot** or **Direct**. Scripts can toggle capture with URLs:
 
 ```sh
 open nothering://on
 open nothering://off
 ```
 
+### Direct link (no hotspot, no cable)
+
+The Mac reaches the phone over Apple's device-to-device Wi-Fi, the one AirDrop uses. It needs no Personal Hotspot on the plan, no shared network and no cable. Wi-Fi has to be on, on both, joined to a network or not.
+
+Once:
+
+1. **iPhone** — open Nothering and leave it open. The proxy starts by itself (**Start when opened**). Allow local network access and Bluetooth when iOS asks.
+2. **Mac** — run `nothering --via direct`, or in the menu bar panel set **Connect iPhone via** to **Direct**. The iPhone asks whether to allow this Mac, and both show the same number: tap **Allow** on the iPhone, then confirm on the Mac that it did show that number. The second answer is what keeps another device in range from answering in the iPhone's place.
+
+After that the iPhone needn't be touched: `nothering --via direct --wake`, or switching Nothering on in the Mac's menu bar, wakes the app on the iPhone over Bluetooth, the proxy starts, and the Mac connects. Stopping it lets the iPhone go, and its proxy stops by itself. Opening Nothering on the iPhone does the same from that side. The Mac finds the phone again after it was out of range. **Auto** never picks this link, and the Mac only wakes the iPhone while it is asked to: a phone that is merely nearby would otherwise move a Mac on its usual Wi-Fi onto cellular data. Tapping Stop on the iPhone ends it on the Mac too.
+
+The wake reaches the app while it is in the background or was ended by iOS to free memory. It doesn't reach an app that was swiped away in the app switcher: open it once again after that.
+
+If pairing doesn't work, the iPhone shows a **Pairing code** under Connect from Mac that can be typed into the Mac instead. **New Pairing Code** there retires it, for a Mac that shouldn't get in any more.
+
+#### With no network at all (a car, a train)
+
+This link is for exactly that: the two talk over the Wi-Fi radio directly and join no network, so Wi-Fi only has to be switched on. But a Mac on no network tells its apps they are offline and has no DNS server to ask, so nothing tries to connect and there is nothing to send through the iPhone. A small helper gives the Mac a stand-in network while the iPhone is linked, and takes it away when the link ends or a real network comes up. It needs an administrator's password once, to install:
+
+```sh
+nothering --install-helper
+```
+
+The menu bar app offers the same with **Install Helper…** when it finds the Mac on no network. See [`OfflineNetwork.swift`](PhoneLink/Sources/OfflineNetwork.swift). With `--system-proxy` the stand-in network also carries the system's proxy setting, so browsers and most apps reach the iPhone with nothing else installed. For the original Mac app with a cable, [`scripts/car-mode`](scripts/car-mode) installs the same helper and a watcher that brings it up and down.
+
+How it works: the phone advertises a Bonjour service (`_nothering._tcp`) while the proxy runs, under a name made from the pairing code, so a Mac finds its own phone among several. The Mac makes one TLS connection to it, keyed by the phone's pairing code, since there is no Wi-Fi password to keep others in radio range out. Every proxied connection is then a stream on that connection, see [`Mux.swift`](ProxyCore/Sources/Mux.swift), because setting up a new connection over this link is too slow to do per request. Pairing gives the Mac that code without typing: the two agree on a secret over a plain connection, show a number derived from it for the person to compare, and the phone sends the code sealed with it, see [`DirectLinkPairing.swift`](ProxyCore/Sources/DirectLinkPairing.swift). The wake is a small Bluetooth service the phone's app keeps reachable while suspended: the Mac reads a challenge from it and writes back an answer only the pairing code gives, see [`DirectLinkWake.swift`](ProxyCore/Sources/DirectLinkWake.swift).
+
 ### CLI
 
 ```sh
-nothering [--via auto|usb|hotspot] [--port 11080] [--host <phone address>] [--system-proxy]
+nothering [--via auto|usb|hotspot|direct] [--wake] [--pair] [--code <pairing code>] [--port 11080] [--host <phone address>] [--system-proxy]
 ```
 
-Forwards `127.0.0.1:<port>` to the phone. `--system-proxy` sets macOS's SOCKS proxy for the duration and restores it on exit. If the process dies without cleanup:
+Forwards `127.0.0.1:<port>` to the phone. `--system-proxy` sets macOS's SOCKS proxy for the duration and restores it on exit. It ends by itself when the proxy is stopped on the iPhone. If the process dies without cleanup:
 
 ```sh
 networksetup -setsocksfirewallproxystate <service> off
@@ -127,12 +161,12 @@ networksetup -setsocksfirewallproxystate <service> off
 
 ```
 iOS/         iPhone app (SwiftUI) — proxy controller, background keeper
-ProxyCore/   Shared SOCKS5 server, local forwarder, UDP framing
+ProxyCore/   Shared SOCKS5 server, local forwarder, UDP framing, direct link and its stream mux
 PhoneLink/   Mac-side links: usbmux, hotspot gateway, SOCKS5/DNS clients
 MacApp/      Menu bar app — extension controller, phone forwarder
 MacProxy/    System extension — transparent proxy + DNS proxy
 Mac/         `nothering` CLI
-scripts/     failsafe.sh
+scripts/     failsafe.sh, car mode for the released Mac app, the fork's build and installers
 Shared/      App icon (Icon Composer)
 ```
 

@@ -20,7 +20,7 @@ struct SetupChecklist: View {
       Step(
         title: connectionMethod.map { "iPhone connected (\($0))" } ?? "iPhone connected",
         status: isPhoneConnected ? .done : .pending,
-        explanation: proxyHint ?? "Connect by USB or join its Personal Hotspot"
+        explanation: proxyHint ?? "Connect by USB or join its Personal Hotspot. With neither, choose Direct below"
       )
       Step(
         title: "Proxy running on iPhone",
