@@ -24,10 +24,13 @@ concurrency:
   group: direct-${{ github.ref }}-${{ inputs.version }}
   cancel-in-progress: ${{ inputs.version == '' && github.ref_type != 'tag' }}
 
+# Both jobs run on GitHub's Intel Macs. Its Apple silicon ones are often all taken, and a job that
+# gets none in fifteen minutes is dropped. The system and Xcode are the same, and what is released
+# is built for both kinds of Mac either way.
 jobs:
   build:
     name: Build and test
-    runs-on: macos-26
+    runs-on: macos-26-intel
     timeout-minutes: 90
     env:
       # Through the environment, not into the script text, since they end up in commands.
@@ -79,7 +82,7 @@ jobs:
 
   offline-network:
     name: Stand-in network on a real Mac
-    runs-on: macos-26
+    runs-on: macos-26-intel
     timeout-minutes: 15
     # It takes the machine off the network for a moment to see what macOS makes of the stand-in.
     # Whatever happens to it must not fail the build.
