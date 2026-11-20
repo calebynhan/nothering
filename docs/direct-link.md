@@ -111,7 +111,7 @@ Nothing here has run on an iPhone yet. What has been checked, and how far that g
 | Stream multiplexer, pairing code, pairing exchange, the wake's challenge and answer, the helper's install commands | tested | 60 tests on Linux. The cryptography ran with swift-crypto, which has CryptoKit's API |
 | Car mode's helper, watcher and installers, and the Mac installer with its launcher | tested | 118 checks against stand-ins for `ifconfig`, `scutil`, `sudo` and the rest |
 | Everything that uses Network, Security and CoreBluetooth | type-checked | against stand-ins for those frameworks on Linux, and read against Apple's real headers |
-| The same, compiled and run on a Mac | see the newest [build](../../../actions) | GitHub builds every push on a Mac, runs the tests there, and connects the two sides of the link to each other over loopback |
+| The same, compiled and run on a Mac | run on GitHub's Mac | with Xcode 26.6 on macOS 26 the iPhone app, the tool and the Mac app compile and 139 tests pass. In them the two sides of the link find each other, pair, and connect over loopback, with the encryption that stays safe if the code gets out later. Every push repeats this, see the newest [build](../../../actions) |
 | What macOS makes of the stand-in network | run on GitHub's Mac | taken off its network, the Mac says it is offline and apps don't try. With the stand-in it counts as online, apps try, and with the proxy setting a page loads through the forwarder, its name looked up on the far side. Every build repeats this, see the newest build's probe |
 | The radio link between a Mac and an iPhone | **never** | needs the two devices |
 | The wake over Bluetooth | **never** | needs the two devices |
@@ -232,7 +232,8 @@ log stream --predicate 'subsystem == "app.nothering"'
   Pairing Code** on the iPhone retires it, and every paired Mac then has to pair again.
 - The link's encryption is keyed by the pairing code. The two sides first offer a way of
   encrypting that stays safe if the code gets out later, and fall back to one that doesn't where
-  the system lacks the first. Each build's tests say which one connects. With the fallback,
+  the system lacks the first. Each build's tests say which ones connect on its Mac: on macOS 26
+  both do, so the first is the one used. What an iPhone takes isn't known yet. With the fallback,
   someone who records the radio traffic and later gets hold of the code can read what they
   recorded. Most of what crosses the link is HTTPS inside it and stays unreadable. Names looked up
   and plain HTTP don't.
