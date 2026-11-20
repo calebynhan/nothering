@@ -9,8 +9,8 @@ import os
 /// what it accepts comes from anyone in range, before any key is shared.
 ///
 /// One question at a time. A Mac asking meanwhile is turned away, so nobody can stack questions on
-/// the screen, and after a question that wasn't allowed the next one has to wait. All state is
-/// confined to `queue`.
+/// the screen. After a question that wasn't allowed the next one has to wait, and after one that
+/// was, nobody may ask again. All state is confined to `queue`.
 final class DirectLinkPairingListener {
   /// One connection from a Mac can arrive as several, one per way it can reach the phone, and the
   /// Mac keeps whichever it likes. So all are taken, up to this many, and the one that asks first
@@ -34,8 +34,8 @@ final class DirectLinkPairingListener {
   private var pause: TimeInterval = 0
   private var pausedUntil = Date.distantPast
 
-  /// `onRequest` gets a request to show, and `nil` when the request it last got is over without an
-  /// answer, e.g. the Mac gave up.
+  /// `onRequest` gets a request to show, and `nil` when the request it last got is over, answered
+  /// or not, e.g. the Mac gave up or nobody answered in time.
   init(code: String, queue: DispatchQueue, onRequest: @escaping (DirectLinkPairingRequest?) -> Void) throws {
     self.queue = queue
     self.code = code
@@ -125,14 +125,18 @@ final class DirectLinkPairingListener {
     asking = nil
     switch ending {
     case .allowed:
-      pause = 0
+      // A Mac was just paired. Whatever asks next would look like the same question asked twice,
+      // and a second tap on Allow would hand the code to a stranger. The app opens pairing again
+      // when the person asks for it.
+      pausedUntil = .distantFuture
     case .refused, .leftAsking:
       pause = min(max(pause * 2, Self.firstPause), Self.longestPause)
       pausedUntil = Date().addingTimeInterval(pause)
     case .notAsked:
       break
     }
-    if ending == .leftAsking { onRequest(nil) }
+    // Off the screen, however it ended: also a question that ran out of time is over.
+    onRequest(nil)
   }
 
   /// Ends an attempt, whatever it got to.

@@ -37,6 +37,24 @@ import Testing
     #expect(stats.bytesDown == UInt64(message.count))
   }
 
+  /// The two sides offer two ways to encrypt, and settle on the first both have. This says which
+  /// ones this system really has, by offering one at a time from the Mac's side.
+  @Test func eachWayOfEncryptingThatConnectsIsNamed() async throws {
+    let server = try await startPhone()
+    defer { server.stop() }
+    let port = try await linkPort(of: server)
+    var connected: [DirectLink.CipherSuite] = []
+    for suite in DirectLink.CipherSuite.allCases {
+      if let mac = try? await MacSide.connect(port: port, parameters: DirectLink.parameters(code: Self.code, suites: [suite])) {
+        connected.append(suite)
+        mac.close()
+      }
+    }
+    print("NOTE DirectLinkLoopbackTests: the link connects with \(connected), of \(DirectLink.CipherSuite.allCases)")
+    // The one Apple's sample uses has to be there. The forward-secret one is a gain where it is.
+    #expect(connected.contains(.plain))
+  }
+
   /// A page load: many connections at once, each a stream on the one connection.
   @Test func manyStreamsShareOneConnection() async throws {
     let (echo, echoPort) = try await startEchoServer()

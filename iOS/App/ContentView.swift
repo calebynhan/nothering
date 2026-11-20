@@ -12,6 +12,7 @@ struct ContentView: View {
   @AppStorage("startsWhenOpened") private var startsWhenOpened = true
   @State private var showingFocusGuide = false
   @State private var confirmingNewCode = false
+  @State private var showsPairingCode = false
 
   private var notifiesOnTerminationBinding: Binding<Bool> {
     Binding(
@@ -77,13 +78,25 @@ struct ContentView: View {
         Section {
           LabeledContent("SOCKS5 port", value: "11080")
           LabeledContent("Pairing code") {
-            // Five groups of four: smaller than the rows around it, so it stays on one line.
-            Text(controller.directLinkCode)
-              .font(.footnote)
-              .monospaced()
-              .lineLimit(1)
-              .minimumScaleFactor(0.7)
-              .textSelection(.enabled)
+            // Whoever reads it off the screen can use this iPhone's connection, so it shows on
+            // a tap and is put away again when the app leaves the screen.
+            if showsPairingCode {
+              // Five groups of four: smaller than the rows around it, so it stays on one line.
+              Text(controller.directLinkCode)
+                .font(.footnote)
+                .monospaced()
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .textSelection(.enabled)
+            } else {
+              Button("Show") { showsPairingCode = true }
+            }
+          }
+          if controller.hasPairedMac {
+            Button(controller.isPairingOpen ? "Waiting for the Mac…" : "Pair Another Mac") {
+              controller.pairAnotherMac()
+            }
+            .disabled(controller.isPairingOpen)
           }
           if let problem = controller.directLinkProblem {
             Label(problem, systemImage: "exclamationmark.triangle.fill")
@@ -108,7 +121,7 @@ struct ContentView: View {
         } header: {
           Text("Connect from Mac")
         } footer: {
-          Text("Connect your Mac with a USB cable or join this iPhone's Personal Hotspot, then turn on Nothering in the Mac menu bar app. With no cable and no hotspot, choose Direct on the Mac while this screen is open: this iPhone then asks once whether to allow that Mac. The pairing code is only for typing into the Mac if that doesn't work. Wi-Fi has to be on, on the iPhone and the Mac, joined to a network or not.")
+          Text("Connect your Mac with a USB cable or join this iPhone's Personal Hotspot, then turn on Nothering in the Mac menu bar app. With no cable and no hotspot, choose Direct on the Mac while this screen is open: this iPhone then asks once whether to allow that Mac. Once a Mac is paired, another one can only ask after you tap Pair Another Mac. The pairing code is only for typing into the Mac if that doesn't work. Wi-Fi has to be on, on the iPhone and the Mac, joined to a network or not.")
         }
 
         Section("Traffic") {
@@ -178,19 +191,22 @@ struct ContentView: View {
           }
         } else if phase == .background {
           controller.didEnterBackground()
+          showsPairingCode = false
         }
       }
     }
     // On the stack, not the list: the list already has an alert of its own.
+    // The buttons answer the question they were shown with, by its ID: an alert keeps showing
+    // what it came up with, also when another request has taken that one's place underneath.
     .alert(
       "Allow this Mac?",
-      isPresented: Binding(get: { controller.pairingPrompt != nil }, set: { if !$0 { controller.answerPairing(false) } }),
+      isPresented: Binding(get: { controller.pairingPrompt != nil }, set: { _ in }),
       presenting: controller.pairingPrompt
-    ) { _ in
-      Button("Allow") { controller.answerPairing(true) }
-      Button("Don't Allow", role: .cancel) { controller.answerPairing(false) }
+    ) { prompt in
+      Button("Allow") { controller.answerPairing(true, for: prompt.id) }
+      Button("Don't Allow", role: .cancel) { controller.answerPairing(false, for: prompt.id) }
     } message: { prompt in
-      Text("\(prompt.name) wants to use this iPhone's connection over Wi-Fi. Allow it only if your Mac shows \(prompt.digits).")
+      Text("“\(prompt.name)” wants to use this iPhone's connection over Wi-Fi. Allow it only if your Mac shows \(prompt.digits).")
     }
   }
 }

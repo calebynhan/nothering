@@ -66,7 +66,7 @@ import Testing
     queue.async {
       responder.start()
       near.write(Data([DirectLinkPairing.version]) + DirectLinkPairing.commitment(publicKey: committed, nonce: nonce) + Data([0])) { _ in }
-      near.read(minimum: DirectLinkPairing.keySize, maximum: DirectLinkPairing.keySize) { _, _, _ in
+      near.read(minimum: phoneReply, maximum: phoneReply) { _, _, _ in
         near.write(revealed + nonce) { _ in }
       }
     }
@@ -90,7 +90,7 @@ import Testing
       responder.start()
       // No name: the phone still has something to call it.
       near.write(Data([DirectLinkPairing.version]) + DirectLinkPairing.commitment(publicKey: key, nonce: nonce) + Data([0])) { _ in }
-      near.read(minimum: DirectLinkPairing.keySize, maximum: DirectLinkPairing.keySize) { _, _, _ in
+      near.read(minimum: phoneReply, maximum: phoneReply) { _, _, _ in
         near.write(key + nonce) { _ in }
       }
     }
@@ -129,14 +129,14 @@ import Testing
       completion: { results.value.append($0) }
     )
     let phoneKey = Curve25519.KeyAgreement.PrivateKey().publicKey.rawRepresentation
+    let phoneNonce = Data(repeating: 3, count: DirectLinkPairing.nonceSize)
     queue.async {
       requester.start()
-      // The hello: version, commitment, name length, name.
-      far.read(minimum: 1 + DirectLinkPairing.keySize + 1 + 8, maximum: 1 + DirectLinkPairing.keySize + 1 + 8) { _, _, _ in
-        far.write(phoneKey) { _ in }
-        far.read(minimum: DirectLinkPairing.keySize + DirectLinkPairing.nonceSize, maximum: DirectLinkPairing.keySize + DirectLinkPairing.nonceSize) { _, _, _ in
+      far.read(minimum: helloWithName, maximum: helloWithName) { _, _, _ in
+        far.write(phoneKey + DirectLinkPairing.commitment(nonce: phoneNonce)) { _ in }
+        far.read(minimum: macReveal, maximum: macReveal) { _, _, _ in
           let junk = Data(repeating: 0x5A, count: 40)
-          far.write(Data([1, 0, UInt8(junk.count)]) + junk) { _ in }
+          far.write(phoneNonce + Data([1, 0, UInt8(junk.count)]) + junk) { _ in }
         }
       }
     }
@@ -144,11 +144,162 @@ import Testing
     #expect(await onQueue(queue) { results.value } == [.failure(.failed)])
   }
 
+  /// The phone committed to its nonce before it saw the Mac's key. Another one afterwards could
+  /// have been picked to steer the number, so the Mac shows no number for it.
+  @Test func aNonceOtherThanTheOneThePhoneCommittedToFails() async {
+    let queue = DispatchQueue(label: "DirectLinkPairingTests")
+    let (near, far) = PipeEnd.pair(queue: queue, pieceSize: 1500)
+    let shown = Box<[String]>([])
+    let results = Box<[Result<String, DirectLinkPairingError>]>([])
+    let requester = PairingRequester(
+      transport: near, queue: queue, name: "Test Mac",
+      onDigits: { shown.value.append($0) },
+      completion: { results.value.append($0) }
+    )
+    let phoneKey = Curve25519.KeyAgreement.PrivateKey().publicKey.rawRepresentation
+    let committed = Data(repeating: 3, count: DirectLinkPairing.nonceSize)
+    let sent = Data(repeating: 4, count: DirectLinkPairing.nonceSize)
+    queue.async {
+      requester.start()
+      far.read(minimum: helloWithName, maximum: helloWithName) { _, _, _ in
+        far.write(phoneKey + DirectLinkPairing.commitment(nonce: committed)) { _ in }
+        far.read(minimum: macReveal, maximum: macReveal) { _, _, _ in
+          far.write(sent) { _ in }
+        }
+      }
+    }
+    await waitUntil(on: queue) { !results.value.isEmpty }
+    #expect(await onQueue(queue) { results.value } == [.failure(.failed)])
+    #expect(await onQueue(queue) { shown.value.isEmpty })
+  }
+
+  /// What the number hangs on leaves the phone only once its question is on the screen. Before
+  /// that a Mac could work the number out, drop the attempt unseen, and try for a better one.
+  @Test func thePhoneGivesItsNonceOnlyOnceItAsks() async {
+    let queue = DispatchQueue(label: "DirectLinkPairingTests")
+    let (near, far) = PipeEnd.pair(queue: queue, pieceSize: 1500)
+    let asked = Box(0)
+    let askedWhenTheNonceCame = Box<Int?>(nil)
+    let kept = Box(false)
+    let responder = PairingResponder(
+      transport: far, queue: queue, code: "K7QM-2XBD-9RTH-W4PN-6CEA",
+      ask: { _ in asked.value += 1 },
+      onEnd: { _ in }
+    )
+    let key = Curve25519.KeyAgreement.PrivateKey().publicKey.rawRepresentation
+    let nonce = Data(repeating: 7, count: DirectLinkPairing.nonceSize)
+    queue.async {
+      responder.start()
+      near.write(Data([DirectLinkPairing.version]) + DirectLinkPairing.commitment(publicKey: key, nonce: nonce) + Data([0])) { _ in }
+      near.read(minimum: phoneReply, maximum: phoneReply) { reply, _, _ in
+        let commitment = Data((reply ?? Data()).suffix(DirectLinkPairing.commitmentSize))
+        near.write(key + nonce) { _ in }
+        near.read(minimum: DirectLinkPairing.nonceSize, maximum: DirectLinkPairing.nonceSize) { phoneNonce, _, _ in
+          askedWhenTheNonceCame.value = asked.value
+          kept.value = DirectLinkPairing.commitment(nonce: Data(phoneNonce ?? Data())) == commitment
+        }
+      }
+    }
+    await waitUntil(on: queue) { askedWhenTheNonceCame.value != nil }
+    #expect(await onQueue(queue) { askedWhenTheNonceCame.value } == 1)
+    #expect(await onQueue(queue) { kept.value })
+    queue.async { responder.cancel() }
+  }
+
+  /// A request that is turned away before it is asked, e.g. while another question is open, never
+  /// gets what the number hangs on.
+  @Test func aRequestThatIsNotPutToThePersonLearnsNothing() async {
+    let queue = DispatchQueue(label: "DirectLinkPairingTests")
+    let (near, far) = PipeEnd.pair(queue: queue, pieceSize: 1500)
+    let responder = Box<PairingResponder?>(nil)
+    let ends = Box<[PairingResponder.Ending]>([])
+    let afterReveal = Box<(data: Data?, isOver: Bool)?>(nil)
+    responder.value = PairingResponder(
+      transport: far, queue: queue, code: "K7QM-2XBD-9RTH-W4PN-6CEA",
+      // What the listener does with a request it can't put to the person.
+      ask: { _ in responder.value?.cancel() },
+      onEnd: { ends.value.append($0) }
+    )
+    let key = Curve25519.KeyAgreement.PrivateKey().publicKey.rawRepresentation
+    let nonce = Data(repeating: 7, count: DirectLinkPairing.nonceSize)
+    queue.async {
+      responder.value?.start()
+      near.write(Data([DirectLinkPairing.version]) + DirectLinkPairing.commitment(publicKey: key, nonce: nonce) + Data([0])) { _ in }
+      near.read(minimum: phoneReply, maximum: phoneReply) { _, _, _ in
+        near.write(key + nonce) { _ in }
+        near.read(minimum: 1, maximum: DirectLinkPairing.nonceSize) { data, isComplete, error in
+          afterReveal.value = (data, isComplete || error != nil)
+        }
+      }
+    }
+    await waitUntil(on: queue) { afterReveal.value != nil }
+    #expect(await onQueue(queue) { afterReveal.value?.data } == nil)
+    #expect(await onQueue(queue) { afterReveal.value?.isOver } == true)
+    #expect(await onQueue(queue) { ends.value } == [.leftAsking])
+  }
+
+  /// A question nobody answers counts as a no, for the Mac and for whoever takes it off the screen.
+  @Test func aQuestionNobodyAnswersIsRefusedInTime() async {
+    let pairing = Pairing(code: "K7QM-2XBD-9RTH-W4PN-6CEA", name: "Test Mac", answerTimeout: 0.1)
+    _ = await pairing.request()
+    #expect(await pairing.result() == .failure(.refused))
+    #expect(await pairing.ends() == [.refused])
+  }
+
+  /// The Mac's name is part of what the number is made from, so it can't be changed on the way
+  /// to the phone without the numbers coming apart.
+  @Test func aNameChangedOnTheWayChangesTheNumber() async {
+    let queue = DispatchQueue(label: "DirectLinkPairingTests")
+    let (near, toInBetween) = PipeEnd.pair(queue: queue, pieceSize: 1500)
+    let (fromInBetween, far) = PipeEnd.pair(queue: queue, pieceSize: 1500)
+    let onTheMac = Box<[String]>([])
+    let onThePhone = Box<[String]>([])
+    let requester = PairingRequester(
+      transport: near, queue: queue, name: "Test Mac",
+      onDigits: { onTheMac.value.append($0) },
+      completion: { _ in }
+    )
+    let responder = PairingResponder(
+      transport: far, queue: queue, code: "K7QM-2XBD-9RTH-W4PN-6CEA",
+      ask: { onThePhone.value.append($0.digits) },
+      onEnd: { _ in }
+    )
+    queue.async {
+      responder.start()
+      requester.start()
+      // Passes everything on untouched, except one letter of the name.
+      toInBetween.read(minimum: helloWithName, maximum: helloWithName) { hello, _, _ in
+        var changed = Data(hello ?? Data())
+        changed[changed.count - 1] ^= 0x01
+        fromInBetween.write(changed) { _ in }
+        fromInBetween.read(minimum: phoneReply, maximum: phoneReply) { reply, _, _ in
+          toInBetween.write(Data(reply ?? Data())) { _ in }
+          toInBetween.read(minimum: macReveal, maximum: macReveal) { reveal, _, _ in
+            fromInBetween.write(Data(reveal ?? Data())) { _ in }
+            fromInBetween.read(minimum: DirectLinkPairing.nonceSize, maximum: DirectLinkPairing.nonceSize) { phoneNonce, _, _ in
+              toInBetween.write(Data(phoneNonce ?? Data())) { _ in }
+            }
+          }
+        }
+      }
+    }
+    await waitUntil(on: queue) { !onTheMac.value.isEmpty && !onThePhone.value.isEmpty }
+    #expect(await onQueue(queue) { onTheMac.value[0] != onThePhone.value[0] })
+    queue.async {
+      responder.cancel()
+      requester.cancel()
+    }
+  }
+
   @Test(arguments: [
     ("Test Mac", "Test Mac"),
     ("  Test\nMac\u{07} ", "TestMac"),
     ("", "A Mac"),
     ("\u{200B}\n", "A Mac"),
+    // Separators that would start a line of their own in the alert, and a mark that turns text around.
+    ("Mac\u{2028}Tap Allow", "MacTap Allow"),
+    ("Mac\u{2029}Tap Allow", "MacTap Allow"),
+    ("Mac\u{202E}wollA", "MacwollA"),
   ])
   func namesAreMadeSafeToShow(sent: String, shown: String) {
     #expect(DirectLinkPairing.displayName(Data(sent.utf8)) == shown)
@@ -161,6 +312,12 @@ import Testing
   }
 }
 
+/// The sizes of the messages, for the tests that play one side by hand: the Mac's hello with the
+/// name "Test Mac", the phone's reply to it, and the Mac's reveal.
+private let helloWithName = 1 + DirectLinkPairing.commitmentSize + 1 + 8
+private let phoneReply = DirectLinkPairing.keySize + DirectLinkPairing.commitmentSize
+private let macReveal = DirectLinkPairing.keySize + DirectLinkPairing.nonceSize
+
 /// One attempt between a Mac and a phone over an in-memory connection.
 private final class Pairing: @unchecked Sendable {
   let queue = DispatchQueue(label: "DirectLinkPairingTests")
@@ -171,11 +328,11 @@ private final class Pairing: @unchecked Sendable {
   private(set) var results: [Result<String, DirectLinkPairingError>] = []
   private var ended: [PairingResponder.Ending] = []
 
-  init(code: String, name: String) {
+  init(code: String, name: String, answerTimeout: TimeInterval = DirectLinkPairing.answerTimeout) {
     // A few bytes at a time, so every message arrives in pieces.
     let (near, far) = PipeEnd.pair(queue: queue, pieceSize: 7)
     responder = PairingResponder(
-      transport: far, queue: queue, code: code,
+      transport: far, queue: queue, code: code, answerTimeout: answerTimeout,
       ask: { [unowned self] in requests.append($0) },
       onEnd: { [unowned self] in ended.append($0) }
     )

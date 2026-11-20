@@ -107,7 +107,7 @@ Nothing here has run on an iPhone yet. What has been checked, and how far that g
 
 | | Checked | How |
 |---|---|---|
-| Stream multiplexer, pairing code, pairing exchange, the wake's challenge and answer | tested | 49 tests on Linux. The cryptography ran with swift-crypto, which has CryptoKit's API |
+| Stream multiplexer, pairing code, pairing exchange, the wake's challenge and answer | tested | 57 tests on Linux. The cryptography ran with swift-crypto, which has CryptoKit's API |
 | Car mode's helper, watcher and installers | tested | 94 checks against stand-ins for `ifconfig`, `scutil`, `route` and the rest |
 | Everything that uses Network, Security and CoreBluetooth | type-checked | against stand-ins for those frameworks on Linux, and read against Apple's real headers |
 | The same, compiled and run on a Mac | see the newest [build](../../../actions) | GitHub builds every push on a Mac, runs the tests there, and connects the two sides of the link to each other over loopback |
@@ -124,7 +124,7 @@ Stop at the first step that fails and note what it said. Start somewhere with Wi
 doesn't leave you without a way to look things up. `nothering` below is `~/.local/bin/nothering`.
 
 1. iPhone: open the app. The proxy starts by itself. Allow local network access and Bluetooth when
-   iOS asks. **Pairing code** shows under Connect from Mac, with no warning under it.
+   iOS asks. Under Connect from Mac there is a **Pairing code** row, with no warning under it.
 2. Mac, Wi-Fi on:
 
    ```sh
@@ -133,8 +133,8 @@ doesn't leave you without a way to look things up. `nothering` below is `~/.loca
 
    The first time it pairs, as in step 4 of the install. It should then print
    `127.0.0.1:11080 -> iPhone via direct`, and the iPhone should say "Mac connected via direct
-   Wi-Fi". If pairing fails, note what it printed and go on with the code typed instead: add
-   `--code <the code>`.
+   Wi-Fi". If pairing fails, note what it printed and go on with the code typed instead: tap
+   **Show** next to Pairing code on the iPhone and add `--code <the code>`.
 3. Traffic goes out over cellular. The address this prints should be the iPhone's on cellular, not
    your Wi-Fi's:
 
@@ -220,10 +220,16 @@ log stream --predicate 'subsystem == "app.nothering"'
 
 - The pairing code is kept in the app's preferences on both sides, not in the keychain. **New
   Pairing Code** on the iPhone retires it, and every paired Mac then has to pair again.
-- The link's encryption is keyed by the pairing code alone. Someone who records the radio traffic
-  and later gets hold of the code can read what they recorded. Most of what crosses the link is
-  HTTPS inside it and stays unreadable. Names looked up and plain HTTP don't.
-- A Mac can only be paired while Nothering is open on the iPhone's screen.
+- The link's encryption is keyed by the pairing code. The two sides first offer a way of
+  encrypting that stays safe if the code gets out later, and fall back to one that doesn't where
+  the system lacks the first. Each build's tests say which one connects. With the fallback,
+  someone who records the radio traffic and later gets hold of the code can read what they
+  recorded. Most of what crosses the link is HTTPS inside it and stays unreadable. Names looked up
+  and plain HTTP don't.
+- A Mac can only be paired while Nothering is open on the iPhone's screen, and once one Mac is
+  paired, only after **Pair Another Mac** was tapped there.
+- Someone in range can keep a Mac from pairing or from connecting for a while, by asking in its
+  place again and again. They get nothing by it, and typing the code still works.
 - When the iPhone's app is closed by iOS, the Mac notices by the connection dropping, about ten
   seconds later, not by an event.
 - On the Mac a stream crosses one more local socket than a USB or hotspot connection does.

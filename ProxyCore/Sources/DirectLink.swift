@@ -25,8 +25,18 @@ enum DirectLink {
     return tag.prefix(6).map { String(format: "%02x", $0) }.joined()
   }
 
-  /// For the connection itself, on both sides.
-  static func parameters(code: String) -> NWParameters {
+  /// The ways the connection may be encrypted, both keyed by the pairing code.
+  enum CipherSuite: UInt16, CaseIterable {
+    /// Adds a key exchange of its own, so what was recorded stays unreadable to someone who gets
+    /// hold of the code later. `TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256`.
+    case forwardSecret = 0xCCAC
+    /// The one Apple's own sample uses. `TLS_PSK_WITH_AES_128_GCM_SHA256`.
+    case plain = 0x00A8
+  }
+
+  /// For the connection itself, on both sides. Both sides offer `suites` in that order and settle
+  /// on the first they share. Only tests name them.
+  static func parameters(code: String, suites: [CipherSuite] = CipherSuite.allCases) -> NWParameters {
     let tcp = NWProtocolTCP.Options()
     // The mux writes whole frames, so waiting to fill a segment only adds delay.
     tcp.noDelay = true
@@ -35,7 +45,7 @@ enum DirectLink {
     tcp.keepaliveIdle = 5
     tcp.keepaliveInterval = 2
     tcp.keepaliveCount = 3
-    let parameters = NWParameters(tls: tlsOptions(code: code), tcp: tcp)
+    let parameters = NWParameters(tls: tlsOptions(code: code, suites: suites), tcp: tcp)
     restrictToTheRoom(parameters)
     return parameters
   }
@@ -74,7 +84,7 @@ enum DirectLink {
     return false
   }
 
-  private static func tlsOptions(code: String) -> NWProtocolTLS.Options {
+  private static func tlsOptions(code: String, suites: [CipherSuite]) -> NWProtocolTLS.Options {
     let options = NWProtocolTLS.Options()
     let key = SymmetricKey(data: Data(DirectLinkCode.normalized(code).utf8))
     let secret = Data(HMAC<SHA256>.authenticationCode(for: Data("nothering direct link 1".utf8), using: key))
@@ -83,10 +93,13 @@ enum DirectLink {
       dispatchData(secret),
       dispatchData(Data("nothering".utf8))
     )
-    sec_protocol_options_append_tls_ciphersuite(
-      options.securityProtocolOptions,
-      tls_ciphersuite_t(rawValue: UInt16(TLS_PSK_WITH_AES_128_GCM_SHA256))!
-    )
+    for suite in suites {
+      // By number: the type that takes it only names the suites that go with certificates.
+      sec_protocol_options_append_tls_ciphersuite(
+        options.securityProtocolOptions,
+        tls_ciphersuite_t(rawValue: suite.rawValue)!
+      )
+    }
     return options
   }
 

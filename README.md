@@ -131,7 +131,7 @@ After that the iPhone needn't be touched: `nothering --via direct --wake`, or sw
 
 The wake reaches the app while it is in the background or was ended by iOS to free memory. It doesn't reach an app that was swiped away in the app switcher: open it once again after that.
 
-If pairing doesn't work, the iPhone shows a **Pairing code** under Connect from Mac that can be typed into the Mac instead. **New Pairing Code** there retires it, for a Mac that shouldn't get in any more.
+Once a Mac is paired, another one can only ask after **Pair Another Mac** was tapped on the iPhone. If pairing doesn't work, the iPhone has a **Pairing code** under Connect from Mac that can be typed into the Mac instead. **New Pairing Code** there retires it, for a Mac that shouldn't get in any more.
 
 #### With no network at all (a car, a train)
 
@@ -143,7 +143,7 @@ nothering --install-helper
 
 The menu bar app offers the same with **Install Helper…** when it finds the Mac on no network. See [`OfflineNetwork.swift`](PhoneLink/Sources/OfflineNetwork.swift). With `--system-proxy` the stand-in network also carries the system's proxy setting, so browsers and most apps reach the iPhone with nothing else installed. For the original Mac app with a cable, [`scripts/car-mode`](scripts/car-mode) installs the same helper and a watcher that brings it up and down.
 
-How it works: the phone advertises a Bonjour service (`_nothering._tcp`) while the proxy runs, under a name made from the pairing code, so a Mac finds its own phone among several. The Mac makes one TLS connection to it, keyed by the phone's pairing code, since there is no Wi-Fi password to keep others in radio range out. Every proxied connection is then a stream on that connection, see [`Mux.swift`](ProxyCore/Sources/Mux.swift), because setting up a new connection over this link is too slow to do per request. Pairing gives the Mac that code without typing: the two agree on a secret over a plain connection, show a number derived from it for the person to compare, and the phone sends the code sealed with it, see [`DirectLinkPairing.swift`](ProxyCore/Sources/DirectLinkPairing.swift). The wake is a small Bluetooth service the phone's app keeps reachable while suspended: the Mac reads a challenge from it and writes back an answer only the pairing code gives, see [`DirectLinkWake.swift`](ProxyCore/Sources/DirectLinkWake.swift).
+How it works: the phone advertises a Bonjour service (`_nothering._tcp`) while the proxy runs, under a name made from the pairing code, so a Mac finds its own phone among several. The Mac makes one TLS connection to it, keyed by the phone's pairing code, since there is no Wi-Fi password to keep others in radio range out. Every proxied connection is then a stream on that connection, see [`Mux.swift`](ProxyCore/Sources/Mux.swift), because setting up a new connection over this link is too slow to do per request. Pairing gives the Mac that code without typing: the two agree on a secret over a plain connection, show a number derived from it for the person to compare, each bound to it before either can know it, and the phone sends the code sealed with it, see [`DirectLinkPairing.swift`](ProxyCore/Sources/DirectLinkPairing.swift). The wake is a small Bluetooth service the phone's app keeps reachable while suspended: the Mac reads a challenge from it and writes back an answer only the pairing code gives, see [`DirectLinkWake.swift`](ProxyCore/Sources/DirectLinkWake.swift).
 
 ### CLI
 

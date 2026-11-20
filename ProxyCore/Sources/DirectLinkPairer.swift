@@ -77,7 +77,7 @@ public final class DirectLinkPairer: @unchecked Sendable {
       // Until the phone has the request. From there the request has its own time limit.
       queue.asyncAfter(deadline: .now() + Self.searchTimeout) { [weak self] in
         guard let self, requester == nil, held == nil else { return }
-        finish(.failed("No iPhone found. Open Nothering on it and keep it open. Wi-Fi has to be on, on both"))
+        finish(.failed("No iPhone found to pair with. Open Nothering on it and keep it open, and if a Mac was paired with it before, tap Pair Another Mac there. Wi-Fi has to be on, on both"))
       }
     }
   }
