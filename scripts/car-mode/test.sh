@@ -310,7 +310,7 @@ chmod +x "$work/system/PrivilegedHelperTools/nothering-offline-network"
 
 echo "The watcher: linked to the iPhone, and the Mac has no network"
 reset; : > "$state/linked"; watch
-check "asks for the stand-in, for its own lifetime" 'grep -q "^sudo HELPER up $watch_pid\$" "$work/asks"'
+check "asks for the stand-in with the app's port, for its own lifetime" 'grep -q "^sudo HELPER up $watch_pid 11080\$" "$work/asks"'
 check "never asks for it to be taken down" '! grep -q down "$work/asks"'
 
 echo "The watcher: linked, and the Mac has a network of its own"

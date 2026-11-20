@@ -5,6 +5,11 @@
 # offline, so nothing tries to connect and there is nothing to send through the iPhone. While that
 # lasts, the helper gives the Mac a stand-in network, see offline-network.sh.
 #
+# The stand-in also carries the system's proxy setting, pointed at the Mac app's link to the
+# iPhone. The app's extension is what captures every connection, but it may not start on a Mac
+# that had no network when it was switched on. With the setting, browsers and most apps get
+# through either way.
+#
 # The command-line tool does the same for itself, so this is not needed with it.
 PATH=/sbin:/usr/sbin:/bin:/usr/bin
 export PATH
@@ -50,7 +55,7 @@ while :; do
     if linked; then
       if ! standin_up; then
         # For as long as this watcher lives.
-        sudo -n "$HELPER" up $$ >/dev/null 2>&1
+        sudo -n "$HELPER" up $$ "$PORT" >/dev/null 2>&1
       fi
     elif standin_up; then
       # Without the iPhone the stand-in leads nowhere, and the Mac shouldn't think otherwise.

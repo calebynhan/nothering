@@ -59,7 +59,7 @@ public final class DirectLinkPairer: @unchecked Sendable {
         case let .waiting(error), let .failed(error):
           logger.error("pairing browse: \(error.debugDescription, privacy: .public)")
           if DirectLink.isLocalNetworkDenied(error) {
-            finish(.failed("Allow Nothering to find devices on your local network in System Settings > Privacy & Security > Local Network"))
+            finish(.failed("Allow Nothering, or the terminal it runs in, to find devices on your local network in System Settings > Privacy & Security > Local Network"))
           } else if case .failed = state {
             finish(.failed("Couldn't look for your iPhone. Check that Wi-Fi is on"))
           }

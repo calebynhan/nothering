@@ -35,7 +35,12 @@ Everything is the original project's, as released. This fork only adds car mode.
    ```
 
 4. Plug the iPhone in, open Nothering on it and tap **Start Proxy**, and switch Nothering on in the
-   Mac's menu bar.
+   Mac's menu bar. **Turn on and off with iPhone proxy** in its panel does that last part by
+   itself from then on.
+
+Where the Mac has no network, car mode gives it a stand-in one while the iPhone's proxy answers,
+with the system's proxy setting pointed at the app's link to the iPhone. Browsers and most apps
+follow that setting, also if the app's extension doesn't start on a Mac that is offline.
 
 ### B. Without a cable
 

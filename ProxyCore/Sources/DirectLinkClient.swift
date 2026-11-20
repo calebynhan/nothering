@@ -130,7 +130,7 @@ public final class DirectLinkClient: @unchecked Sendable {
       case let .waiting(error), let .failed(error):
         logger.error("direct link browse: \(error.debugDescription, privacy: .public)")
         if DirectLink.isLocalNetworkDenied(error) {
-          setStatus(.blocked("Allow Nothering to find devices on your local network in System Settings > Privacy & Security > Local Network"))
+          setStatus(.blocked("Allow Nothering, or the terminal it runs in, to find devices on your local network in System Settings > Privacy & Security > Local Network"))
         }
         if case .failed = state {
           stopBrowsing()
