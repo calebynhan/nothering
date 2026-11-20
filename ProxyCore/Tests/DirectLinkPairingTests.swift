@@ -360,17 +360,21 @@ private final class Pairing: @unchecked Sendable {
   /// What the phone asks its person.
   func request() async throws -> DirectLinkPairingRequest {
     await waitUntil(on: queue) { [self] in !requests.isEmpty }
-    return try #require(await onQueue(queue) { [self] in requests.first })
+    // Taken first and required after: Xcode's compiler gives up on the two in one expression.
+    let first = await onQueue(queue) { [self] in requests.first }
+    return try #require(first)
   }
 
   func digitsOnTheMac() async throws -> String {
     await waitUntil(on: queue) { [self] in !digits.isEmpty }
-    return try #require(await onQueue(queue) { [self] in digits.first })
+    let first = await onQueue(queue) { [self] in digits.first }
+    return try #require(first)
   }
 
   func result() async throws -> Result<String, DirectLinkPairingError> {
     await waitUntil(on: queue) { [self] in !results.isEmpty }
-    return try #require(await onQueue(queue) { [self] in results.first })
+    let first = await onQueue(queue) { [self] in results.first }
+    return try #require(first)
   }
 
   /// How the phone's side ended, for each time it did.

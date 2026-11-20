@@ -237,7 +237,7 @@ check "status says up" '[ "$(helper status)" = up ]'
 echo "The helper: up again for the same process"
 before=$(wc -l < "$state/log")
 helper up "$owner"
-check "does nothing" '! tail -n +$((before + 1)) "$state/log" | grep -q "create\|destroy\|scutil set"'
+check "does nothing" '! tail -n +$((before + 1)) "$state/log" | grep -Eq "create|destroy|scutil set"'
 
 echo "The helper: the process ends"
 kill "$owner"; wait "$owner" 2>/dev/null; sleep 4
@@ -351,7 +351,7 @@ fi
 echo "The helper: up without a port"
 reset; sleeper; owner=$sleeper_pid
 helper up "$owner"
-check "no proxy is set" '! grep -q Proxies "$state/keys" && ! grep -q "set .*Proxies\|SOCKS" "$state/log"'
+check "no proxy is set" '! grep -q Proxies "$state/keys" && ! grep -Eq "set .*Proxies|SOCKS" "$state/log"'
 helper down
 
 echo "The helper: up with the forwarder's port"
@@ -463,7 +463,7 @@ try_installer() {
   check "the sudo rule names only the helper" '[ "$(cat "$installed_rules")" = "%admin ALL=(root) NOPASSWD: $installed_helper" ]'
   check "the rule was checked before it went in, and only root reads it" 'grep -q "^visudo -cf $installed_helper.rule\$" "$state/log" && [ "$(ls -l "$installed_rules" | cut -c1-10)" = "-r--r-----" ]'
   check "nothing is left where the two were put together" '[ "$(ls "$work/system/PrivilegedHelperTools")" = nothering-offline-network ]'
-  check "root takes the helper from a pipe, and reads no file for it" 'grep -qx "cat > .$installed_helper.new." "$state/log" && ! grep -q "^install \|^cp \|install -o" "$state/log"'
+  check "root takes the helper from a pipe, and reads no file for it" 'grep -qx "cat > .$installed_helper.new." "$state/log" && ! grep -Eq "^install |^cp |install -o" "$state/log"'
   check "the watcher is in place" 'cmp -s "$watcher_file" "$work/repo/car-watch.sh" && [ -x "$watcher_file" ]'
   check "the launch agent runs the watcher" 'grep -q "<string>$watcher_file</string>" "$agent" && grep -q "<string>app.nothering.car-mode</string>" "$agent"'
   check "the launch agent is started" 'grep -q "^launchctl bootstrap gui/$(id -u) $agent\$" "$state/log"'
