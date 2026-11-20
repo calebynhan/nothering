@@ -112,7 +112,7 @@ Nothing here has run on an iPhone yet. What has been checked, and how far that g
 | Car mode's helper, watcher and installers, and the Mac installer with its launcher | tested | 118 checks against stand-ins for `ifconfig`, `scutil`, `sudo` and the rest |
 | Everything that uses Network, Security and CoreBluetooth | type-checked | against stand-ins for those frameworks on Linux, and read against Apple's real headers |
 | The same, compiled and run on a Mac | see the newest [build](../../../actions) | GitHub builds every push on a Mac, runs the tests there, and connects the two sides of the link to each other over loopback |
-| What macOS makes of the stand-in network | see the newest build's probe | a job takes its Mac off the network for a minute and writes down what it sees |
+| What macOS makes of the stand-in network | run on GitHub's Mac | taken off its network, the Mac says it is offline and apps don't try. With the stand-in it counts as online, apps try, and with the proxy setting a page loads through the forwarder, its name looked up on the far side. Every build repeats this, see the newest build's probe |
 | The radio link between a Mac and an iPhone | **never** | needs the two devices |
 | The wake over Bluetooth | **never** | needs the two devices |
 | The proxy extension on the stand-in network | **never** | needs a Mac with the extension approved |
@@ -184,7 +184,9 @@ In the car it is then the double-click of step 8, and nothing on the iPhone.
 ## Open questions only devices can answer
 
 - With the stand-in network up, do apps try to connect, and do they follow the proxy setting it
-  carries? If step 7 fails, these show what the Mac believes:
+  carries? On GitHub's Mac they did both. Yours may have something that one lacks: an older
+  macOS, a VPN, a network that is only half gone. If step 7 fails, these show what the Mac
+  believes:
 
   ```sh
   route -n get default
