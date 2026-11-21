@@ -153,6 +153,8 @@ final class ExtensionController: NSObject {
   /// way, which gives way to it. Nothing else: turnOff() saves the DNS proxy's configuration, and a
   /// Mac that never had capture on would be asked to allow it.
   func turnOffAutomatically() {
+    // A turn-on waiting to go after one that just ended gives way too. This saves nothing.
+    isOnWanted = false
     guard isRunning || turningOn != nil else { return }
     turnOff()
   }

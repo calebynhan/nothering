@@ -45,6 +45,9 @@ final class ProxyController {
   }
   /// Until when another Mac may ask, after the person said so.
   private(set) var pairingOpenUntil = Date.distantPast
+  /// When the person last allowed a Mac to pair. That Mac connects some seconds later, once it
+  /// was confirmed on the Mac too.
+  @ObservationIgnored private var pairingAllowedAt = Date.distantPast
   @ObservationIgnored private var pairingAnswer: (@Sendable (Bool) -> Void)?
   /// The person stopped the proxy since the app last came to the front, so coming to the front
   /// again doesn't start it right back.
@@ -397,6 +400,7 @@ final class ProxyController {
       // the code on its way to the Mac: after a yes it lets nobody ask again by itself.
       hasPairedMac = true
       pairingOpenUntil = .distantPast
+      pairingAllowedAt = .now
     }
   }
 
@@ -523,6 +527,7 @@ final class ProxyController {
     directLinkProblem = nil
     answerPairing(false)
     pairingOpenUntil = .distantPast
+    pairingAllowedAt = .distantPast
     macAskedAt = nil
     isSessionNew = false
     isRunning = false
@@ -606,9 +611,11 @@ final class ProxyController {
     }
     // Keeping the silent audio running with no client drains the battery, so turn off once the last Mac leaves.
     if hadLinks, macLinks.isEmpty {
-      if pairingOpenUntil > .now {
-        // Unless the person is pairing another Mac, which needs it. From here it waits like a
-        // proxy that opening the app started.
+      if pairingOpenUntil > .now || pairingPrompt != nil
+        || 0...Self.pairingWindow ~= Date.now.timeIntervalSince(pairingAllowedAt) {
+        // Unless the person is pairing a Mac, which needs it: pairing is open, a Mac is asking, or
+        // one was just allowed and hasn't connected yet. From here it waits like a proxy that
+        // opening the app started.
         hadMacLink = false
         waitsAsOpened()
       } else if let macAskedAt, Date.now.timeIntervalSince(macAskedAt) < Self.wokenWithoutMacTimeout {
