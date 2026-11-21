@@ -1,0 +1,7 @@
+total 11368
+-rw-r--r--  1 runner  staff    14312 Nov 21 03:27 install-car-mode.sh
+-rw-r--r--  1 runner  staff     2657 Nov 21 03:27 install-mac.sh
+-rwxr-xr-x  1 runner  staff  2036496 Nov 21 03:27 nothering
+-rw-r--r--  1 runner  staff  3750613 Nov 21 03:27 Nothering-Direct.ipa
+-rw-r--r--  1 runner  staff      408 Nov 21 03:27 SHA256SUMS
+-rw-r--r--  1 runner  staff     2323 Nov 21 03:27 source.json

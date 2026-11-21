@@ -1,0 +1,14 @@
+commit: 3ddbfbbd9e2cf2fd4fa128763d6948970265f691
+version: 0.6.1 (328)
+xcode: Xcode 26.6 Build version 17F113 
+macOS: 26.6.1
+car-mode-scripts: ok (76 s)
+direct-scripts: ok (0 s)
+generate: ok (48 s)
+build-iphone-app: ok (79 s)
+build-mac-tool: ok (51 s)
+build-mac-app: ok (28 s)
+package: ok (4 s)
+test-ProxyCore: ok (28 s)
+test-PhoneLink: ok (11 s)
+all steps passed

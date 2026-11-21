@@ -1,0 +1,150 @@
+✔ Suite LocalForwarderTests passed after 0.025 seconds.
+◇ Suite MuxSocketRelayTests started.
+◇ Test carriesASocketOverAStreamAndBack() started.
+✔ Test carriesASocketOverAStreamAndBack() passed after 0.993 seconds.
+◇ Test keepsSocketsApart() started.
+✔ Test keepsSocketsApart() passed after 0.718 seconds.
+◇ Test readingACancelledSocketIsHarmless() started.
+✔ Test readingACancelledSocketIsHarmless() passed after 0.602 seconds.
+◇ Test closingTheSocketEndsTheStream() started.
+✔ Test closingTheSocketEndsTheStream() passed after 0.070 seconds.
+✔ Suite MuxSocketRelayTests passed after 2.385 seconds.
+◇ Suite MuxTests started.
+◇ Test echoesOverOneStream() started.
+✔ Test echoesOverOneStream() passed after 0.001 seconds.
+◇ Test carriesALargeTransferIntact() started.
+✔ Test carriesALargeTransferIntact() passed after 1.666 seconds.
+◇ Test keepsStreamsApart() started.
+✔ Test keepsStreamsApart() passed after 0.811 seconds.
+◇ Test slowReaderHoldsBackOnlyItsOwnStream() started.
+✔ Test slowReaderHoldsBackOnlyItsOwnStream() passed after 0.915 seconds.
+◇ Test halfCloseLeavesTheOtherDirectionOpen() started.
+✔ Test halfCloseLeavesTheOtherDirectionOpen() passed after 0.001 seconds.
+◇ Test resetFailsTheOtherSide() started.
+✔ Test resetFailsTheOtherSide() passed after 0.001 seconds.
+◇ Test closingTheConnectionFailsEveryStream() started.
+✔ Test closingTheConnectionFailsEveryStream() passed after 0.001 seconds.
+◇ Test closingAfterAFlushDeliversWhatWasWritten() started.
+✔ Test closingAfterAFlushDeliversWhatWasWritten() passed after 0.028 seconds.
+◇ Test closingAtOnceDropsWhatWasNotSentYet() started.
+✔ Test closingAtOnceDropsWhatWasNotSentYet() passed after 0.030 seconds.
+◇ Test nothingNewIsTakenUpWhileClosingAfterAFlush() started.
+✔ Test nothingNewIsTakenUpWhileClosingAfterAFlush() passed after 0.065 seconds.
+◇ Test aCancelledStreamCompletesNoWrite() started.
+✔ Test aCancelledStreamCompletesNoWrite() passed after 0.208 seconds.
+◇ Test closingAfterAFlushDoesNotWaitForEver() started.
+✔ Test closingAfterAFlushDoesNotWaitForEver() passed after 0.052 seconds.
+◇ Test readsExactCountsAcrossFrames() started.
+✔ Test readsExactCountsAcrossFrames() passed after 0.001 seconds.
+◇ Test rejectsAWrongPreface() started.
+✔ Test rejectsAWrongPreface() passed after 0.002 seconds.
+◇ Test resetsAStreamThatOverrunsItsWindow() started.
+✔ Test resetsAStreamThatOverrunsItsWindow() passed after 0.009 seconds.
+◇ Test closesOnAnUnknownFrameType() started.
+✔ Test closesOnAnUnknownFrameType() passed after 0.002 seconds.
+✔ Suite MuxTests passed after 3.801 seconds.
+◇ Suite ProxyServerTests started.
+◇ Test relaysThroughIPv4Connect() started.
+2026-11-21 03:28:02.274076+0000 xctest[25292:70829] [proxy] listening on port 49242
+2026-11-21 03:28:02.274860+0000 xctest[25292:70829] [proxy] accepted client on interface lo0
+✔ Test relaysThroughIPv4Connect() passed after 0.005 seconds.
+◇ Test relaysThroughDomainConnect() started.
+2026-11-21 03:28:02.279267+0000 xctest[25292:70829] [proxy] listening on port 49245
+2026-11-21 03:28:02.280067+0000 xctest[25292:70829] [proxy] accepted client on interface lo0
+✔ Test relaysThroughDomainConnect() passed after 0.010 seconds.
+◇ Test relaysFramedUDP() started.
+2026-11-21 03:28:02.292250+0000 xctest[25292:70829] [proxy] listening on port 49248
+2026-11-21 03:28:02.292789+0000 xctest[25292:70785] [proxy] accepted client on interface lo0
+✔ Test relaysFramedUDP() passed after 0.007 seconds.
+◇ Test streamsEventsToListeningClients() started.
+2026-11-21 03:28:02.297494+0000 xctest[25292:70836] [proxy] listening on port 49250
+2026-11-21 03:28:02.298260+0000 xctest[25292:70836] [proxy] accepted client on interface lo0
+✔ Test streamsEventsToListeningClients() passed after 0.002 seconds.
+◇ Test deliversEventSentRightBeforeStop() started.
+2026-11-21 03:28:02.300578+0000 xctest[25292:70785] [proxy] listening on port 49252
+2026-11-21 03:28:02.301340+0000 xctest[25292:70786] [proxy] accepted client on interface lo0
+✔ Test deliversEventSentRightBeforeStop() passed after 0.002 seconds.
+◇ Test closesEventStreamWhenClientLeaves() started.
+2026-11-21 03:28:02.303229+0000 xctest[25292:70829] [proxy] listening on port 49254
+2026-11-21 03:28:02.304686+0000 xctest[25292:70785] [proxy] accepted client on interface lo0
+✔ Test closesEventStreamWhenClientLeaves() passed after 0.013 seconds.
+◇ Test rejectsUnsupportedCommand() started.
+2026-11-21 03:28:02.317426+0000 xctest[25292:70786] [proxy] listening on port 49256
+2026-11-21 03:28:02.318223+0000 xctest[25292:70836] [proxy] accepted client on interface lo0
+✔ Test rejectsUnsupportedCommand() passed after 0.002 seconds.
+◇ Test reportsRefusedConnection() started.
+2026-11-21 03:28:02.319914+0000 xctest[25292:70785] [proxy] listening on port 49258
+2026-11-21 03:28:02.320630+0000 xctest[25292:70786] [proxy] accepted client on interface lo0
+2026-11-21 03:28:02.321910+0000 xctest[25292:70829] [connection] nw_socket_handle_socket_event [C90:1] Socket SO_ERROR [61: Connection refused]
+2026-11-21 03:28:02.321992+0000 xctest[25292:70829] [connection] nw_endpoint_flow_failed_with_error [C90 127.0.0.1:1 in_progress socket-flow (satisfied (Path is satisfied), viable, interface: lo0)] already failing, returning
+2026-11-21 03:28:02.322939+0000 xctest[25292:70829] [proxy] connect 127.0.0.1:1 failed: POSIXErrorCode(rawValue: 61): Connection refused
+✔ Test reportsRefusedConnection() passed after 0.003 seconds.
+◇ Test describesListenerFailure() started.
+2026-11-21 03:28:02.323730+0000 xctest[25292:70829] [proxy] listening on port 49261
+✔ Test describesListenerFailure() passed after 0.001 seconds.
+◇ Test allowsOnlyHotspotOrLoopbackInterfaces(name:allowed:) started.
+◇ Test case passing 2 arguments name → "lo0", allowed → true to allowsOnlyHotspotOrLoopbackInterfaces(name:allowed:) started.
+​◇ Test case passing 2 arguments name → "bridge100", allowed → true to allowsOnlyHotspotOrLoopbackInterfaces(name:allowed:) started.
+​◇ Test case passing 2 arguments name → "en0", allowed → false to allowsOnlyHotspotOrLoopbackInterfaces(name:allowed:) started.
+​◇ Test case passing 2 arguments name → "pdp_ip0", allowed → false to allowsOnlyHotspotOrLoopbackInterfaces(name:allowed:) started.
+​◇ Test case passing 2 arguments name → "utun3", allowed → false to allowsOnlyHotspotOrLoopbackInterfaces(name:allowed:) started.
+​✔ Test allowsOnlyHotspotOrLoopbackInterfaces(name:allowed:) with 5 test cases passed after 0.001 seconds.
+◇ Test rejectsClientsOnDisallowedInterfaces() started.
+2026-11-21 03:28:02.327441+0000 xctest[25292:70785] [proxy] listening on port 49262
+2026-11-21 03:28:02.328128+0000 xctest[25292:70829] [proxy] rejected client on interface lo0
+2026-11-21 03:28:02.328535+0000 xctest[25292:70785] [connection] nw_socket_handle_socket_event [C91:1] Socket SO_ERROR [54: Connection reset by peer]
+2026-11-21 03:28:02.328605+0000 xctest[25292:70785] [connection] nw_protocol_socket_reset_linger [C91:1] setsockopt SO_LINGER failed [22: Invalid argument]
+2026-11-21 03:28:02.328698+0000 xctest[25292:70829] [connection] nw_read_request_report [C91] Receive failed with error "Connection reset by peer"
+✔ Test rejectsClientsOnDisallowedInterfaces() passed after 0.001 seconds.
+◇ Test classifiesLinkByInterface(name:link:) started.
+2026-11-21 03:28:02.328725+0000 xctest[25292:70829] [connection] nw_flow_service_reads [C91 127.0.0.1:49262 failed socket-flow (satisfied (Path is satisfied), viable, interface: lo0)] No output handler
+◇ Test case passing 2 arguments name → "lo0", link → .usb to classifiesLinkByInterface(name:link:) started.
+​◇ Test case passing 2 arguments name → "bridge100", link → .hotspot to classifiesLinkByInterface(name:link:) started.
+​◇ Test case passing 2 arguments name → "en0", link → nil to classifiesLinkByInterface(name:link:) started.
+​◇ Test case passing 2 arguments name → "pdp_ip0", link → nil to classifiesLinkByInterface(name:link:) started.
+​✔ Test classifiesLinkByInterface(name:link:) with 4 test cases passed after 0.009 seconds.
+◇ Test countsLoopbackClientsAsUSB() started.
+2026-11-21 03:28:02.339230+0000 xctest[25292:70829] [proxy] listening on port 49264
+2026-11-21 03:28:02.339905+0000 xctest[25292:70829] [proxy] accepted client on interface lo0
+✔ Test countsLoopbackClientsAsUSB() passed after 0.063 seconds.
+◇ Test resolvesLoopbackInterfaceForAcceptedClients() started.
+2026-11-21 03:28:02.403144+0000 xctest[25292:70836] [proxy] listening on port 49266
+2026-11-21 03:28:02.403810+0000 xctest[25292:70785] [proxy] accepted client on interface lo0
+2026-11-21 03:28:02.404804+0000 xctest[25292:70785] [proxy] accepted client on interface lo0
+✔ Test resolvesLoopbackInterfaceForAcceptedClients() passed after 0.002 seconds.
+✔ Suite ProxyServerTests passed after 0.133 seconds.
+◇ Test mapsIPv4ToWellKnownNAT64Prefix() started.
+✔ Test mapsIPv4ToWellKnownNAT64Prefix() passed after 0.001 seconds.
+◇ Test parsesIPv4LiteralSentAsDomainName() started.
+✔ Test parsesIPv4LiteralSentAsDomainName() passed after 0.001 seconds.
+◇ Suite SocketStreamTests started.
+◇ Test chainsSmallReadsOverLargeBufferWithoutRecursing() started.
+✔ Test chainsSmallReadsOverLargeBufferWithoutRecursing() passed after 0.111 seconds.
+✔ Suite SocketStreamTests passed after 0.112 seconds.
+◇ Suite UsageLogTests started.
+◇ Test groupsBytesByDay() started.
+✔ Test groupsBytesByDay() passed after 0.001 seconds.
+◇ Test mergesIntoAnEarlierDayWhenTheClockGoesBack() started.
+✔ Test mergesIntoAnEarlierDayWhenTheClockGoesBack() passed after 0.001 seconds.
+◇ Test sumsThisMonthOnly() started.
+✔ Test sumsThisMonthOnly() passed after 0.001 seconds.
+◇ Test fillsQuietDaysInRecentHistory() started.
+✔ Test fillsQuietDaysInRecentHistory() passed after 0.001 seconds.
+◇ Test prunesOldDaysButKeepsAllTimeTotal() started.
+✔ Test prunesOldDaysButKeepsAllTimeTotal() passed after 0.064 seconds.
+◇ Test ignoresEmptyRecords() started.
+✔ Test ignoresEmptyRecords() passed after 0.001 seconds.
+◇ Test roundTripsThroughJSON() started.
+✔ Test roundTripsThroughJSON() passed after 0.001 seconds.
+✔ Suite UsageLogTests passed after 0.068 seconds.
+✔ Test run with 90 tests in 11 suites passed after 11.109 seconds.
+2026-11-21 03:28:02.954 xcodebuild[25017:70012] [MT] IDETestOperationsObserverDebug: 13.469 elapsed -- Testing started completed.
+2026-11-21 03:28:02.955 xcodebuild[25017:70012] [MT] IDETestOperationsObserverDebug: 0.001 sec, +0.001 sec -- start
+2026-11-21 03:28:02.955 xcodebuild[25017:70012] [MT] IDETestOperationsObserverDebug: 13.469 sec, +13.467 sec -- end
+
+Test session results, code coverage, and logs:
+	/Users/runner/work/nothering/nothering/.build-ci/Logs/Test/Test-ProxyCore-2026.11.21_03-27-38-+0000.xcresult
+
+** TEST SUCCEEDED **
+
+Testing started

@@ -1,0 +1,23 @@
+The installer
+  ok: install-mac.sh parses
+  ok: installs without an error
+  ok: fetches the tool from the repository's newest release
+  ok: the tool is in place and can be run
+  ok: the tool was tried before it replaced anything
+  ok: the helper is installed with it
+  ok: the password is asked for by the installer, before the tool needs it
+  ok: the launcher is on the Desktop, can be run, and parses
+The installer, when the tool that was fetched doesn't run
+  ok: fails
+  ok: the tool that was there is untouched, and nothing is left over
+The launcher: the tool stops by itself
+  ok: ends without an error
+  ok: connects over the direct link, wakes the iPhone and sets the system's proxy
+  ok: leaves the proxy settings to the tool
+The launcher: the tool was cut off
+  ok: ends with the tool's status
+  ok: switches off the proxy that pointed at the forwarder
+  ok: and no other
+  ok: a disabled service isn't asked about
+
+All checks passed.

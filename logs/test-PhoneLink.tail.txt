@@ -1,0 +1,150 @@
+​◇ Test case passing 2 arguments name → "github.com", isTailscale → false to classifiesTailscaleNames(name:isTailscale:) started.
+​◇ Test case passing 2 arguments name → "tsnet.example.com", isTailscale → false to classifiesTailscaleNames(name:isTailscale:) started.
+​✔ Test classifiesTailscaleNames(name:isTailscale:) with 4 test cases passed after 0.015 seconds.
+◇ Test exchangesOverTCPFraming() started.
+✔ Test exchangesOverTCPFraming() passed after 0.001 seconds.
+✔ Suite DNSTests passed after 0.018 seconds.
+◇ Suite OfflineNetworkTests started.
+◇ Test readsTheServiceTheMacIsOn() started.
+✔ Test readsTheServiceTheMacIsOn() passed after 0.001 seconds.
+◇ Test aMacOnNoNetworkNamesNoService() started.
+✔ Test aMacOnNoNetworkNamesNoService() passed after 0.001 seconds.
+◇ Test theHelpersNetworkIsToldByItsName() started.
+✔ Test theHelpersNetworkIsToldByItsName() passed after 0.001 seconds.
+◇ Test theHelperScriptIsWellFormed() started.
+✔ Test theHelperScriptIsWellFormed() passed after 0.001 seconds.
+◇ Test theHelperIsAskedWithThePortOnlyWhenGiven() started.
+✔ Test theHelperIsAskedWithThePortOnlyWhenGiven() passed after 0.001 seconds.
+◇ Test theSudoRuleNamesOnlyTheHelper() started.
+✔ Test theSudoRuleNamesOnlyTheHelper() passed after 0.001 seconds.
+◇ Test theInstallCommandsCarryWhatTheyInstall() started.
+✔ Test theInstallCommandsCarryWhatTheyInstall() passed after 0.002 seconds.
+◇ Test rootUsesTheSystemsOwnTools() started.
+✔ Test rootUsesTheSystemsOwnTools() passed after 0.001 seconds.
+◇ Test theInstallCommandsPutTheHelperAndItsRuleInPlace() started.
+✔ Test theInstallCommandsPutTheHelperAndItsRuleInPlace() passed after 0.193 seconds.
+✔ Suite OfflineNetworkTests passed after 0.213 seconds.
+◇ Suite PhoneQuitDetectorTests started.
+◇ Test clearsSwipeAwayWhenTheAppRelaunchesBetweenProbes() started.
+✔ Test clearsSwipeAwayWhenTheAppRelaunchesBetweenProbes() passed after 0.001 seconds.
+◇ Test reportsHardKillAfterAStopAndQuickRestart() started.
+✔ Test reportsHardKillAfterAStopAndQuickRestart() passed after 0.001 seconds.
+◇ Test staysQuietWhenTheUserStopsTheProxy() started.
+✔ Test staysQuietWhenTheUserStopsTheProxy() passed after 0.001 seconds.
+◇ Test reportsSilentProxyOnlyWhileThePhoneIsAttached(isPhoneAttached:hasQuit:) started.
+◇ Test case passing 2 arguments isPhoneAttached → true, hasQuit → true to reportsSilentProxyOnlyWhileThePhoneIsAttached(isPhoneAttached:hasQuit:) started.
+​◇ Test case passing 2 arguments isPhoneAttached → false, hasQuit → false to reportsSilentProxyOnlyWhileThePhoneIsAttached(isPhoneAttached:hasQuit:) started.
+​✔ Test reportsSilentProxyOnlyWhileThePhoneIsAttached(isPhoneAttached:hasQuit:) with 2 test cases passed after 0.001 seconds.
+◇ Test clearsWhenAnOldPhoneAppAnswersAgain() started.
+✔ Test clearsWhenAnOldPhoneAppAnswersAgain() passed after 0.001 seconds.
+◇ Test staysDismissedUntilTheNextQuit() started.
+✔ Test staysDismissedUntilTheNextQuit() passed after 0.001 seconds.
+◇ Test ignoresALateLinkLossForADismissedSwipeAway() started.
+✔ Test ignoresALateLinkLossForADismissedSwipeAway() passed after 0.001 seconds.
+◇ Test dismissingWithoutAWarningDoesNotHideTheNextQuit() started.
+✔ Test dismissingWithoutAWarningDoesNotHideTheNextQuit() passed after 0.001 seconds.
+◇ Test matchesTheServerEventBytes() started.
+✔ Test matchesTheServerEventBytes() passed after 0.001 seconds.
+✔ Suite PhoneQuitDetectorTests passed after 0.003 seconds.
+◇ Suite PhoneEventListenerTests started.
+◇ Test movesToANewLinkWhenTheOldStreamNeverEnds() started.
+2026-11-21 03:28:13.385213+0000 xctest[26132:72978] [proxy] listening on port 49269
+2026-11-21 03:28:13.385284+0000 xctest[26132:72978] [proxy] listening on port 49270
+2026-11-21 03:28:13.385838+0000 xctest[26132:72979] [proxy] accepted client on interface lo0
+2026-11-21 03:28:13.387022+0000 xctest[26132:72979] [proxy] accepted client on interface lo0
+✔ Test movesToANewLinkWhenTheOldStreamNeverEnds() passed after 0.003 seconds.
+✔ Suite PhoneEventListenerTests passed after 0.013 seconds.
+◇ Suite PhoneLinkDiagnosisTests started.
+◇ Test doesNotReportUSBWhenItsProxyDoesNotAnswer() started.
+✔ Test doesNotReportUSBWhenItsProxyDoesNotAnswer() passed after 0.001 seconds.
+◇ Test autoFallsBackToAnAnsweringHotspotProxy() started.
+✔ Test autoFallsBackToAnAnsweringHotspotProxy() passed after 0.001 seconds.
+◇ Test asksForUSBWhenUSBIsPreferred() started.
+✔ Test asksForUSBWhenUSBIsPreferred() passed after 0.001 seconds.
+◇ Test asksForPersonalHotspotWhenNoGatewayExists() started.
+✔ Test asksForPersonalHotspotWhenNoGatewayExists() passed after 0.001 seconds.
+◇ Test distinguishesNoIPhoneFromUnavailableUSBMux() started.
+✔ Test distinguishesNoIPhoneFromUnavailableUSBMux() passed after 0.001 seconds.
+◇ Test doesNotTakeAnOrdinaryIPv6RouterForTheIPhone() started.
+✔ Test doesNotTakeAnOrdinaryIPv6RouterForTheIPhone() passed after 0.001 seconds.
+◇ Test detectsAnIPhoneHotspotWhoseProxyIsStopped() started.
+✔ Test detectsAnIPhoneHotspotWhoseProxyIsStopped() passed after 0.001 seconds.
+◇ Test detectsAnIPv6OnlyIPhoneHotspotWhoseProxyIsStopped() started.
+✔ Test detectsAnIPv6OnlyIPhoneHotspotWhoseProxyIsStopped() passed after 0.001 seconds.
+◇ Test answeringPreferredLinksHaveNoHint() started.
+✔ Test answeringPreferredLinksHaveNoHint() passed after 0.001 seconds.
+✔ Suite PhoneLinkDiagnosisTests passed after 0.012 seconds.
+◇ Suite ResolvedNamesTests started.
+◇ Test matchesOnlyAddressesTheResolverReturned() started.
+✔ Test matchesOnlyAddressesTheResolverReturned() passed after 0.001 seconds.
+◇ Test ignoresCaseAndTrailingDot() started.
+✔ Test ignoresCaseAndTrailingDot() passed after 0.001 seconds.
+◇ Test accumulatesAnswersForTheSameName() started.
+✔ Test accumulatesAnswersForTheSameName() passed after 0.001 seconds.
+✔ Suite ResolvedNamesTests passed after 0.002 seconds.
+◇ Suite ResolverFailoverTests started.
+◇ Test triesResolversInOrderUntilOneAnswers() started.
+✔ Test triesResolversInOrderUntilOneAnswers() passed after 0.001 seconds.
+◇ Test startsWithTheLastResolverThatAnswered() started.
+✔ Test startsWithTheLastResolverThatAnswered() passed after 0.001 seconds.
+◇ Test keepsThePreferredResolverWhenNoneAnswer() started.
+✔ Test keepsThePreferredResolverWhenNoneAnswer() passed after 0.001 seconds.
+✔ Suite ResolverFailoverTests passed after 0.001 seconds.
+◇ Suite SOCKS5Tests started.
+◇ Test connectsThroughProxyServer() started.
+2026-11-21 03:28:13.431161+0000 xctest[26132:72978] [proxy] listening on port 49273
+2026-11-21 03:28:13.431549+0000 xctest[26132:72980] [proxy] accepted client on interface lo0
+2026-11-21 03:28:13.433790+0000 xctest[26132:72979] [proxy] accepted client on interface lo0
+✔ Test connectsThroughProxyServer() passed after 0.004 seconds.
+◇ Test exchangesDatagramFramesThroughProxyServer() started.
+2026-11-21 03:28:13.435671+0000 xctest[26132:72977] [proxy] listening on port 49276
+2026-11-21 03:28:13.436004+0000 xctest[26132:72980] [proxy] accepted client on interface lo0
+✔ Test exchangesDatagramFramesThroughProxyServer() passed after 0.003 seconds.
+◇ Test readsEventsFromProxyServer() started.
+2026-11-21 03:28:13.439119+0000 xctest[26132:72980] [proxy] listening on port 49278
+2026-11-21 03:28:13.439334+0000 xctest[26132:72977] [proxy] accepted client on interface lo0
+✔ Test readsEventsFromProxyServer() passed after 0.001 seconds.
+◇ Test reportsRefusedDestination() started.
+2026-11-21 03:28:13.440586+0000 xctest[26132:72977] [proxy] listening on port 49280
+2026-11-21 03:28:13.441066+0000 xctest[26132:72980] [proxy] accepted client on interface lo0
+2026-11-21 03:28:13.442117+0000 xctest[26132:72979] [connection] nw_socket_handle_socket_event [C3:1] Socket SO_ERROR [61: Connection refused]
+2026-11-21 03:28:13.449423+0000 xctest[26132:72979] [connection] nw_endpoint_flow_failed_with_error [C3 127.0.0.1:1 in_progress socket-flow (satisfied (Path is satisfied), viable, interface: lo0)] already failing, returning
+2026-11-21 03:28:13.449709+0000 xctest[26132:72979] [proxy] connect 127.0.0.1:1 failed: POSIXErrorCode(rawValue: 61): Connection refused
+✔ Test reportsRefusedDestination() passed after 0.010 seconds.
+✔ Suite SOCKS5Tests passed after 0.019 seconds.
+◇ Test greetFailsWhenNothingAnswers() started.
+✔ Test greetFailsWhenNothingAnswers() passed after 0.001 seconds.
+◇ Test tellsReceiveTimeoutFromPeerClose() started.
+✔ Test tellsReceiveTimeoutFromPeerClose() passed after 0.051 seconds.
+◇ Suite TailscaleTests started.
+◇ Test classifiesTailscaleAddresses(address:isTailscale:) started.
+◇ Test case passing 2 arguments address → 4 bytes, isTailscale → true to classifiesTailscaleAddresses(address:isTailscale:) started.
+​◇ Test case passing 2 arguments address → 4 bytes, isTailscale → true to classifiesTailscaleAddresses(address:isTailscale:) started.
+​◇ Test case passing 2 arguments address → 4 bytes, isTailscale → true to classifiesTailscaleAddresses(address:isTailscale:) started.
+​◇ Test case passing 2 arguments address → 4 bytes, isTailscale → false to classifiesTailscaleAddresses(address:isTailscale:) started.
+​◇ Test case passing 2 arguments address → 4 bytes, isTailscale → false to classifiesTailscaleAddresses(address:isTailscale:) started.
+​◇ Test case passing 2 arguments address → 4 bytes, isTailscale → false to classifiesTailscaleAddresses(address:isTailscale:) started.
+​◇ Test case passing 2 arguments address → 16 bytes, isTailscale → true to classifiesTailscaleAddresses(address:isTailscale:) started.
+​◇ Test case passing 2 arguments address → 16 bytes, isTailscale → false to classifiesTailscaleAddresses(address:isTailscale:) started.
+​◇ Test case passing 2 arguments address → 3 bytes, isTailscale → false to classifiesTailscaleAddresses(address:isTailscale:) started.
+​✔ Test classifiesTailscaleAddresses(address:isTailscale:) with 9 test cases passed after 0.001 seconds.
+◇ Test keepsTailscalesOwnConnectionsOffTheTunnel() started.
+✔ Test keepsTailscalesOwnConnectionsOffTheTunnel() passed after 0.001 seconds.
+◇ Test doesNotRouteLoopbackThroughTailscale() started.
+✔ Test doesNotRouteLoopbackThroughTailscale() passed after 0.001 seconds.
+✔ Suite TailscaleTests passed after 0.002 seconds.
+◇ Suite TunnelDatagramsTests started.
+◇ Test sendsOnlyRoutedDestinationsStraightAndRelaysTheirReplies() started.
+✔ Test sendsOnlyRoutedDestinationsStraightAndRelaysTheirReplies() passed after 0.002 seconds.
+✔ Suite TunnelDatagramsTests passed after 0.002 seconds.
+✔ Test run with 49 tests in 10 suites passed after 0.362 seconds.
+2026-11-21 03:28:13.939 xcodebuild[25800:72099] [MT] IDETestOperationsObserverDebug: 1.311 elapsed -- Testing started completed.
+2026-11-21 03:28:13.939 xcodebuild[25800:72099] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-11-21 03:28:13.939 xcodebuild[25800:72099] [MT] IDETestOperationsObserverDebug: 1.311 sec, +1.311 sec -- end
+
+Test session results, code coverage, and logs:
+	/Users/runner/work/nothering/nothering/.build-ci/Logs/Test/Test-PhoneLink-2026.11.21_03-28-06-+0000.xcresult
+
+** TEST SUCCEEDED **
+
+Testing started

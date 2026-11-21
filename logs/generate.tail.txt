@@ -1,0 +1,18 @@
+Loading and constructing the graph
+It might take a while if the cache is empty
+Using cache binaries for the following targets: 
+Generating workspace Nothering.xcworkspace
+Generating project Nothering
+Resolving package dependencies using xcodebuild
+2026-11-21 03:24:20.315 xcodebuild[20175:57238] [MT] IDERunDestination: Supported platforms for the buildables in the current scheme is empty.
+
+2026-11-21 03:24:20.654 xcodebuild[20175:57238] [MT] IDERunDestination: Supported platforms for the buildables in the current scheme is empty.
+
+2026-11-21 03:24:35.217 xcodebuild[20175:57242]  IDEDownloadableMetalToolchainCoordinator: Failed to remount the Metal Toolchain: Mount failed because of dissent: Mount is still un use. Reason: a device is (already) in use (kDAReturnBusy)
+
+Total time taken: 38.616s
+! Warning 
+  The following items may need attention: 
+   ▸ Invalid product name '$(BUNDLE_ID_PREFIX).mac.proxy'. This string must contain only alphanumeric (A-Z,a-z,0-9), period (.), hyphen (-), and underscore (_) characters.
+✔ Success 
+  Project generated. 

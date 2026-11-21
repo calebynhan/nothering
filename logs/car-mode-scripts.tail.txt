@@ -1,0 +1,138 @@
+The helper is the same everywhere it is kept
+  ok: the script in OfflineNetwork.swift is offline-network.sh
+  ok: neither script contains the installer's end marker
+  ok: offline-network.sh parses
+  ok: car-watch.sh parses
+  ok: install.sh parses
+  ok: build-installer.sh parses
+  ok: the single-file installer parses
+The helper: up for a live process
+  ok: exit status 0
+  ok: both interfaces exist
+  ok: the pair is joined and both ends are up
+  ok: address set
+  ok: service and DNS published
+  ok: default route added
+  ok: status says up
+The helper: up again for the same process
+  ok: does nothing
+The helper: the process ends
+  ok: taken down by itself
+  ok: no default route is deleted
+The helper: a real network comes up
+  ok: taken down, the real one untouched
+  ok: no default route is deleted
+  ok: up then says the Mac has a network, and creates nothing
+The helper: an IPv6-only network
+  ok: counts as the Mac's own network
+The helper: a tunnel with addresses of its own and no router
+  ok: is no way out: the stand-in comes up and stays
+The helper: down by hand
+  ok: a watcher is running
+  ok: everything gone
+  ok: the watcher stopped
+  ok: down again is harmless
+  ok: status says down
+The helper: asked by a process that ignores the usual signal to end
+  ok: a watcher is running
+  ok: the watcher stopped all the same
+  ok: everything gone
+The helper: a number left behind by a watcher that is gone
+  ok: the process that has the number now is left alone
+  ok: the number is forgotten
+  ok: what isn't a number is run as nothing
+The helper: a second process takes over
+  ok: the new process is followed
+  ok: still up after the first one ended
+  ok: down once the second ended
+The helper: asked twice at once
+  ok: built once, and whole
+  ok: down leaves nothing, and no second watcher behind
+The helper: waiting its turn
+  ok: a watcher's end waits as long as it takes, other calls half a minute
+  ok: while another call has the lock, the stand-in stays
+  ok: once that call is done, the watcher takes it down
+The helper: a watcher's end is for the stand-in it was started for
+  ok: exit status 0
+  ok: the end of another's watcher takes nothing down
+  ok: the end of its own does
+  ok: and it ends with nothing left to do
+The helper: what asked for it ends, and its process group is told to end, as a launch agent's is
+  ok: the watcher outlives that and takes the stand-in down
+The helper: up without a port
+  ok: no proxy is set
+The helper: up with the forwarder's port
+  ok: exit status 0
+  ok: the network is up as without one
+  ok: the proxy setting is published
+  ok: it points at this Mac and that port
+  ok: taken down with the rest
+The helper: ports that aren't ports
+  ok: all refused with exit 64
+  ok: nothing created, and nothing run from the argument
+  ok: every real port is taken
+The helper: arguments that aren't a process
+  ok: all refused with exit 64
+  ok: nothing created, and nothing run from the argument
+The watcher: linked to the iPhone, and the Mac has no network
+  ok: asks for the stand-in with the app's port, for its own lifetime
+  ok: never asks for it to be taken down
+The watcher: linked, and the Mac has a network of its own
+  ok: asks for nothing
+The watcher: linked, on an IPv6-only network
+  ok: asks for nothing
+The watcher: linked, with only a tunnel that has no router
+  ok: asks for the stand-in
+The watcher: linked, and the stand-in is already up
+  ok: asks for nothing, so it isn't torn down and rebuilt
+The watcher: the iPhone is gone and the stand-in is still up
+  ok: asks for it to be taken down
+  ok: never asks for it to be brought up
+The watcher: no iPhone, no stand-in
+  ok: asks for nothing
+The installer, from a copy of the repository
+  ok: installs without an error
+  ok: the helper is in place, as the repository has it
+  ok: the helper is made root's, and others can run it and not write it
+  ok: the sudo rule names only the helper
+  ok: the rule was checked before it went in, and only root reads it
+  ok: nothing is left where the two were put together
+  ok: root takes the helper from a pipe, and reads no file for it
+  ok: the watcher is in place
+  ok: the launch agent runs the watcher
+  ok: the launch agent is started
+  ok: the agent's end leaves what it started alone, the helper's watcher with it
+  ok: removes without an error
+  ok: nothing is left, the helper's lock included
+  ok: the launch agent is stopped
+The installer, as the single file a release carries
+  ok: installs without an error
+  ok: the helper is in place, as the repository has it
+  ok: the helper is made root's, and others can run it and not write it
+  ok: the sudo rule names only the helper
+  ok: the rule was checked before it went in, and only root reads it
+  ok: nothing is left where the two were put together
+  ok: root takes the helper from a pipe, and reads no file for it
+  ok: the watcher is in place
+  ok: the launch agent runs the watcher
+  ok: the launch agent is started
+  ok: the agent's end leaves what it started alone, the helper's watcher with it
+  ok: removes without an error
+  ok: nothing is left, the helper's lock included
+  ok: the launch agent is stopped
+The installer, fed to sh the way a download is
+  ok: installs without an error
+  ok: the helper is in place
+  ok: the watcher is in place
+The installer, fed to sh in a directory that has files with the scripts' names
+  ok: installs without an error
+  ok: the helper is its own, not the file that was lying there
+  ok: the watcher is its own, not the file that was lying there
+The installer, with nothing to install
+  ok: fails
+  ok: and never asks for the password
+The watcher: with a network, the iPhone isn't asked
+  ok: no connection to the iPhone's proxy
+  ok: without one it is asked
+
+All checks passed.
