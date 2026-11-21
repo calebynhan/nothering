@@ -131,7 +131,7 @@ After that the iPhone needn't be touched: `nothering --via direct --wake`, or sw
 
 The wake reaches the app while it is in the background or was ended by iOS to free memory. It doesn't reach an app that was swiped away in the app switcher: open it once again after that.
 
-Once a Mac is paired, another one can only ask after **Pair Another Mac** was tapped on the iPhone, which also starts the proxy if it was stopped. A Mac that leaves meanwhile, or before the new one has connected, doesn't stop it. If pairing doesn't work, the iPhone has a **Pairing code** under Connect from Mac that can be typed into the Mac instead: `--code` for the tool, **Type the Code Instead** in the menu bar panel, where **Forget** drops a code that was mistyped. **New Pairing Code** on the iPhone retires it, for a Mac that shouldn't get in any more.
+Once a Mac is paired, another one can only ask after **Pair Another Mac** was tapped on the iPhone, which also starts the proxy if it was stopped. A Mac that leaves meanwhile, or in the two minutes after **Allow** before the new one has connected, doesn't stop it. If pairing doesn't work, the iPhone has a **Pairing code** under Connect from Mac that can be typed into the Mac instead: `--code` for the tool, **Type the Code Instead** in the menu bar panel, where **Forget** drops a code that was mistyped. **New Pairing Code** on the iPhone retires it, for a Mac that shouldn't get in any more.
 
 #### With no network at all (a car, a train)
 

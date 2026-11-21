@@ -586,6 +586,9 @@ final class ProxyController {
       linkSeenAt[.hotspot] = now
     }
     if stats.totalDirectConnections > previous.totalDirectConnections {
+      // A Mac that wasn't on the direct link is now: the one just allowed has connected. Links are
+      // counted by kind, not by Mac, so one that was already on it hides this, and the window runs out.
+      if !macLinks.contains(.direct) { pairingAllowedAt = .distantPast }
       linkSeenAt[.direct] = now
       // A Mac has the code, also one it was typed into.
       if !hasPairedMac {
@@ -614,8 +617,8 @@ final class ProxyController {
       if pairingOpenUntil > .now || pairingPrompt != nil
         || 0...Self.pairingWindow ~= Date.now.timeIntervalSince(pairingAllowedAt) {
         // Unless the person is pairing a Mac, which needs it: pairing is open, a Mac is asking, or
-        // one was just allowed and hasn't connected yet. From here it waits like a proxy that
-        // opening the app started.
+        // one was allowed in the last two minutes and hasn't come on the direct link yet. From here
+        // it waits like a proxy that opening the app started.
         hadMacLink = false
         waitsAsOpened()
       } else if let macAskedAt, Date.now.timeIntervalSince(macAskedAt) < Self.wokenWithoutMacTimeout {
