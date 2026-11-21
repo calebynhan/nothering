@@ -1,0 +1,13 @@
+03:22:54.006388 ARP, Request who-has 198.18.0.1 tell 198.18.0.2, length 28
+03:22:54.229253 IP 198.18.0.2.137 > 198.18.0.255.137: UDP, length 68
+03:22:54.233187 ARP, Request who-has 198.18.0.1 tell 198.18.0.2, length 28
+03:22:55.527367 IP 198.18.0.2.137 > 198.18.0.255.137: UDP, length 68
+03:23:00.436634 IP 198.18.0.2.58482 > 198.18.0.1.53: 18316+ AAAA? lookup.nothering-probe.example. (48)
+03:23:00.436719 IP 198.18.0.2.58333 > 198.18.0.1.53: 2326+ A? example.com. (29)
+03:23:01.240546 IP 198.18.0.2.63852 > 198.18.0.1.53: 21175+ PTR? 2.0.18.198.in-addr.arpa. (41)
+03:23:01.340538 IP 198.18.0.2.57934 > 198.18.0.1.53: 24489+ Type65? gspe1-ssl.ls.apple.com. (40)
+03:23:01.340628 IP 198.18.0.2.65265 > 198.18.0.1.53: 56566+ A? gspe1-ssl.ls.apple.com. (40)
+03:23:01.460694 IP 198.18.0.2.58482 > 198.18.0.1.53: 18316+ AAAA? lookup.nothering-probe.example. (48)
+03:23:02.221838 IP 198.18.0.2.5353 > 224.0.0.251.5353: 0 [16q] PTR (QM)? lb._dns-sd._udp.local. PTR (QM)? _apple-mobdev._tcp.local. PTR (QM)? 91db07ed._sub._apple-mobdev2._tcp.local. PTR (QM)? _apple-pairable._tcp.local. PTR (QM)? _uscan._tcp.local. PTR (QM)? _uscans._tcp.local. PTR (QM)? _ippusb._tcp.local. PTR (QM)? _scanner._tcp.local. PTR (QM)? _ipp._tcp.local. PTR (QM)? _ipps._tcp.local. PTR (QM)? _printer._tcp.local. PTR (QM)? _pdl-datastream._tcp.local. PTR (QM)? _ptp._tcp.local. PTR (QM)? _airport._tcp.local. PTR (QM)? _rdlink._tcp.local. PTR (QM)? _companion-link._tcp.local. (299)
+03:23:03.516015 IP 198.18.0.2.58482 > 198.18.0.1.53: 18316+ AAAA? lookup.nothering-probe.example. (48)
+

@@ -1,0 +1,672 @@
+/Users/runner/work/nothering/nothering/scripts/ci/reachability.swift:53:58: warning: 'SCNetworkReachabilityCreateWithAddress' was deprecated in macOS 14.4 [#DeprecatedDeclaration]
+51 | address.sin_addr.s_addr = inet_addr("192.0.2.1")
+52 | let reachability = withUnsafePointer(to: &address) {
+53 |   $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { SCNetworkReachabilityCreateWithAddress(nil, $0) }
+   |                                                          `- warning: 'SCNetworkReachabilityCreateWithAddress' was deprecated in macOS 14.4 [#DeprecatedDeclaration]
+54 | }
+55 | var flags = SCNetworkReachabilityFlags()
+
+/Users/runner/work/nothering/nothering/scripts/ci/reachability.swift:56:22: warning: 'SCNetworkReachabilityGetFlags' was deprecated in macOS 14.4 [#DeprecatedDeclaration]
+54 | }
+55 | var flags = SCNetworkReachabilityFlags()
+56 | if let reachability, SCNetworkReachabilityGetFlags(reachability, &flags) {
+   |                      `- warning: 'SCNetworkReachabilityGetFlags' was deprecated in macOS 14.4 [#DeprecatedDeclaration]
+57 |   print("reachability of an internet address: reachable=\(flags.contains(.reachable)) connectionRequired=\(flags.contains(.connectionRequired)) raw=\(flags.rawValue)")
+58 | } else {
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+
+=================== before: the machine's own network
+--- route -n get default
+   route to: default
+destination: default
+       mask: default
+    gateway: 192.168.64.1
+  interface: en0
+      flags: <UP,GATEWAY,DONE,STATIC,PRCLONING,GLOBAL>
+ recvpipe  sendpipe  ssthresh  rtt,msec    rttvar  hopcount      mtu     expire
+       0         0         0         0         0         0      1500         0 
+--- route -n get -inet6 default
+route: writing to routing socket: not in table
+--- netstat -rn -f inet (top)
+Routing tables
+
+Internet:
+Destination        Gateway            Flags               Netif Expire
+default            192.168.64.1       UGScg                 en0       
+127                127.0.0.1          UCS                   lo0       
+127.0.0.1          127.0.0.1          UH                    lo0       
+169.254            link#5             UCS                   en0      !
+192.168.64         link#5             UCS                   en0      !
+192.168.64.1/32    link#5             UCS                   en0      !
+192.168.64.1       16:9d:99:28:15:64  UHLWIir               en0   1180
+192.168.64.5/32    link#5             UCS                   en0      !
+224.0.0/4          link#5             UmCS                  en0      !
+224.0.0.251        1:0:5e:0:0:fb      UHmLWI                en0       
+255.255.255.255/32 link#5             UCS                   en0      !
+--- scutil --nwi
+Network information
+
+IPv4 network interface information
+     en0 : flags      : 0x5 (IPv4,DNS)
+           address    : 192.168.64.5
+           reach      : 0x00000002 (Reachable)
+
+   REACH : flags 0x00000002 (Reachable)
+
+IPv6 network interface information
+   No IPv6 states found
+
+
+   REACH : flags 0x00000000 (Not Reachable)
+
+Network interfaces: en0
+--- scutil --dns (top)
+DNS configuration
+
+resolver #1
+  nameserver[0] : 192.168.64.1
+  if_index : 5 (en0)
+  flags    : Request A records
+  reach    : 0x00020002 (Reachable,Directly Reachable Address)
+
+resolver #2
+  domain   : local
+  options  : mdns
+  timeout  : 5
+  flags    : Request A records
+  reach    : 0x00000000 (Not Reachable)
+  order    : 300000
+
+resolver #3
+  domain   : 254.169.in-addr.arpa
+  options  : mdns
+  timeout  : 5
+  flags    : Request A records
+  reach    : 0x00000000 (Not Reachable)
+  order    : 300200
+
+resolver #4
+  domain   : 8.e.f.ip6.arpa
+  options  : mdns
+  timeout  : 5
+  flags    : Request A records
+  reach    : 0x00000000 (Not Reachable)
+--- scutil --proxy
+<dictionary> {
+  ExceptionsList : <array> {
+    0 : *.local
+    1 : 169.254/16
+  }
+  FTPPassive : 1
+}
+--- State:/Network/Service/*/IPv4
+  subKey [0] = State:/Network/Service/1EBB900E-307C-401A-89FF-F611B7C1A416/IPv4
+--- State:/Network/Global/IPv4
+<dictionary> {
+  PrimaryInterface : en0
+  PrimaryService : 1EBB900E-307C-401A-89FF-F611B7C1A416
+  Router : 192.168.64.1
+}
+--- State:/Network/Global/IPv6
+  No such key
+--- ifconfig feth5478
+ifconfig: interface feth5478 does not exist
+--- what macOS tells apps
+path status: satisfied
+path interfaces: ["en0 (wiredEthernet)", "en0 (wiredEthernet)"]
+path supports IPv4: true, IPv6: false, DNS: true
+path expensive: false, constrained: false
+reachability of an internet address: reachable=true connectionRequired=false raw=3
+State:/Network/Global/IPv4: {
+    PrimaryInterface = en0;
+    PrimaryService = "1EBB900E-307C-401A-89FF-F611B7C1A416";
+    Router = "192.168.64.1";
+}
+State:/Network/Global/DNS: {
+    ServerAddresses =     (
+        "192.168.64.1"
+    );
+    "__CONFIGURATION_ID__" = "Default: 1EBB900E-307C-401A-89FF-F611B7C1A416 0";
+    "__FLAGS__" = 2;
+    "__IF_INDEX__" = 5;
+    "__ORDER__" = 0;
+}
+IPv4 services: ["State:/Network/Service/1EBB900E-307C-401A-89FF-F611B7C1A416/IPv4"]
+proxies for apps: SOCKSEnable=none SOCKSProxy=none SOCKSPort=none
+
+=================== the network taken away, no stand-in
+--- route -n get default
+route: writing to routing socket: not in table
+--- route -n get -inet6 default
+route: writing to routing socket: not in table
+--- netstat -rn -f inet (top)
+Routing tables
+
+Internet:
+Destination        Gateway            Flags               Netif Expire
+127                127.0.0.1          UCS                   lo0       
+127.0.0.1          127.0.0.1          UH                    lo0       
+224.0.0            link#1             UmCS                  lo0       
+--- scutil --nwi
+Network information
+
+IPv4 network interface information
+   No IPv4 states found
+
+   REACH : flags 0x00000000 (Not Reachable)
+
+IPv6 network interface information
+   No IPv6 states found
+
+
+   REACH : flags 0x00000000 (Not Reachable)
+--- scutil --dns (top)
+DNS configuration
+
+resolver #1
+  flags    : 
+  reach    : 0x00000000 (Not Reachable)
+
+resolver #2
+  domain   : local
+  options  : mdns
+  timeout  : 5
+  flags    : 
+  reach    : 0x00000000 (Not Reachable)
+  order    : 300000
+
+resolver #3
+  domain   : 254.169.in-addr.arpa
+  options  : mdns
+  timeout  : 5
+  flags    : 
+  reach    : 0x00000000 (Not Reachable)
+  order    : 300200
+
+resolver #4
+  domain   : 8.e.f.ip6.arpa
+  options  : mdns
+  timeout  : 5
+  flags    : 
+  reach    : 0x00000000 (Not Reachable)
+  order    : 300400
+
+--- scutil --proxy
+<dictionary> {
+}
+--- State:/Network/Service/*/IPv4
+  no keys.
+--- State:/Network/Global/IPv4
+  No such key
+--- State:/Network/Global/IPv6
+  No such key
+--- ifconfig feth5478
+ifconfig: interface feth5478 does not exist
+--- what macOS tells apps
+path status: unsatisfied
+path interfaces: []
+path supports IPv4: false, IPv6: false, DNS: false
+path expensive: false, constrained: false
+reachability of an internet address: reachable=false connectionRequired=false raw=0
+State:/Network/Global/IPv4: none
+State:/Network/Global/DNS: {
+    "__CONFIGURATION_ID__" = "Default: 0";
+    "__FLAGS__" = 0;
+    "__ORDER__" = 0;
+}
+IPv4 services: []
+proxies for apps: SOCKSEnable=none SOCKSProxy=none SOCKSPort=none
+curl: (7) Failed to connect to 192.0.2.10:80 after 1 ms: Could not connect to server
+
+=================== the network taken away, stand-in up
+--- route -n get default
+   route to: default
+destination: default
+       mask: default
+    gateway: 198.18.0.1
+  interface: feth5478
+      flags: <UP,GATEWAY,DONE,STATIC,PRCLONING,GLOBAL>
+ recvpipe  sendpipe  ssthresh  rtt,msec    rttvar  hopcount      mtu     expire
+       0         0         0         0         0         0      1500         0 
+--- route -n get -inet6 default
+route: writing to routing socket: not in table
+--- netstat -rn -f inet (top)
+Routing tables
+
+Internet:
+Destination        Gateway            Flags               Netif Expire
+default            198.18.0.1         UGScg            feth5478       
+127                127.0.0.1          UCS                   lo0       
+127.0.0.1          127.0.0.1          UH                    lo0       
+198.18.0           link#10            UCS              feth5478      !
+198.18.0.1/32      link#10            UCS              feth5478      !
+198.18.0.1         link#10            UHLWIir          feth5478      !
+198.18.0.255       ff:ff:ff:ff:ff:ff  UHLWbI           feth5478      !
+224.0.0/4          link#10            UmCS             feth5478      !
+224.0.0.251        1:0:5e:0:0:fb      UHmLWI           feth5478       
+255.255.255.255/32 link#10            UCS              feth5478      !
+--- scutil --nwi
+Network information
+
+IPv4 network interface information
+ feth5478 : flags      : 0x5 (IPv4,DNS)
+           address    : 198.18.0.2
+           reach      : 0x00000002 (Reachable)
+
+   REACH : flags 0x00000002 (Reachable)
+
+IPv6 network interface information
+   No IPv6 states found
+
+
+   REACH : flags 0x00000000 (Not Reachable)
+
+Network interfaces: feth5478
+--- scutil --dns (top)
+DNS configuration
+
+resolver #1
+  nameserver[0] : 198.18.0.1
+  flags    : Request A records
+  reach    : 0x00020002 (Reachable,Directly Reachable Address)
+
+resolver #2
+  domain   : local
+  options  : mdns
+  timeout  : 5
+  flags    : Request A records
+  reach    : 0x00000000 (Not Reachable)
+  order    : 300000
+
+resolver #3
+  domain   : 254.169.in-addr.arpa
+  options  : mdns
+  timeout  : 5
+  flags    : Request A records
+  reach    : 0x00000000 (Not Reachable)
+  order    : 300200
+
+resolver #4
+  domain   : 8.e.f.ip6.arpa
+  options  : mdns
+  timeout  : 5
+  flags    : Request A records
+  reach    : 0x00000000 (Not Reachable)
+  order    : 300400
+--- scutil --proxy
+<dictionary> {
+}
+--- State:/Network/Service/*/IPv4
+  subKey [0] = State:/Network/Service/NOTHERING-OFFLINE/IPv4
+--- State:/Network/Global/IPv4
+<dictionary> {
+  PrimaryInterface : feth5478
+  PrimaryService : NOTHERING-OFFLINE
+  Router : 198.18.0.1
+}
+--- State:/Network/Global/IPv6
+  No such key
+--- ifconfig feth5478
+feth5478: flags=8843<UP,BROADCAST,RUNNING,SIMPLEX,MULTICAST> mtu 1500
+	options=8<VLAN_HWTAGGING>
+	ether 66:65:74:68:15:66
+	inet 198.18.0.2 netmask 0xffffff00 broadcast 198.18.0.255
+	peer: feth5479
+	media: autoselect (10Gbase-T <full-duplex>)
+	status: active
+--- what macOS tells apps
+path status: satisfied
+path interfaces: ["feth5478 (wiredEthernet)", "feth5478 (wiredEthernet)"]
+path supports IPv4: true, IPv6: false, DNS: true
+path expensive: false, constrained: false
+reachability of an internet address: reachable=true connectionRequired=false raw=3
+State:/Network/Global/IPv4: {
+    PrimaryInterface = feth5478;
+    PrimaryService = "NOTHERING-OFFLINE";
+    Router = "198.18.0.1";
+}
+State:/Network/Global/DNS: {
+    ServerAddresses =     (
+        "198.18.0.1"
+    );
+    "__CONFIGURATION_ID__" = "Default: NOTHERING-OFFLINE 0";
+    "__FLAGS__" = 2;
+    "__ORDER__" = 0;
+}
+IPv4 services: ["State:/Network/Service/NOTHERING-OFFLINE/IPv4"]
+proxies for apps: SOCKSEnable=none SOCKSProxy=none SOCKSPort=none
+tcpdump: verbose output suppressed, use -v[v]... for full protocol decode
+listening on feth5478, link-type EN10MB (Ethernet), snapshot length 524288 bytes
+curl: (28) Connection timed out after 3003 milliseconds
+curl: (28) Resolving timed out after 3005 milliseconds
+198.18.0.1 (198.18.0.1) deleted
+12 packets captured
+12 packets received by filter
+0 packets dropped by kernel
+
+=================== the network taken away, stand-in up with the proxy setting
+--- route -n get default
+   route to: default
+destination: default
+       mask: default
+    gateway: 198.18.0.1
+  interface: feth5478
+      flags: <UP,GATEWAY,DONE,STATIC,PRCLONING,GLOBAL>
+ recvpipe  sendpipe  ssthresh  rtt,msec    rttvar  hopcount      mtu     expire
+       0         0         0         0         0         0      1500         0 
+--- route -n get -inet6 default
+route: writing to routing socket: not in table
+--- netstat -rn -f inet (top)
+Routing tables
+
+Internet:
+Destination        Gateway            Flags               Netif Expire
+default            198.18.0.1         UGScg            feth5478       
+127                127.0.0.1          UCS                   lo0       
+127.0.0.1          127.0.0.1          UH                    lo0       
+198.18.0           link#10            UCS              feth5478      !
+198.18.0.1/32      link#10            UCS              feth5478      !
+198.18.0.1         link#10            UHLWIir          feth5478      !
+224.0.0/4          link#10            UmCS             feth5478      !
+224.0.0.251        1:0:5e:0:0:fb      UHmLWI           feth5478       
+255.255.255.255/32 link#10            UCS              feth5478      !
+--- scutil --nwi
+Network information
+
+IPv4 network interface information
+ feth5478 : flags      : 0x5 (IPv4,DNS)
+           address    : 198.18.0.2
+           reach      : 0x00000002 (Reachable)
+
+   REACH : flags 0x00000002 (Reachable)
+
+IPv6 network interface information
+   No IPv6 states found
+
+
+   REACH : flags 0x00000000 (Not Reachable)
+
+Network interfaces: feth5478
+--- scutil --dns (top)
+DNS configuration
+
+resolver #1
+  nameserver[0] : 198.18.0.1
+  flags    : Request A records
+  reach    : 0x00020002 (Reachable,Directly Reachable Address)
+
+resolver #2
+  domain   : local
+  options  : mdns
+  timeout  : 5
+  flags    : Request A records
+  reach    : 0x00000000 (Not Reachable)
+  order    : 300000
+
+resolver #3
+  domain   : 254.169.in-addr.arpa
+  options  : mdns
+  timeout  : 5
+  flags    : Request A records
+  reach    : 0x00000000 (Not Reachable)
+  order    : 300200
+
+resolver #4
+  domain   : 8.e.f.ip6.arpa
+  options  : mdns
+  timeout  : 5
+  flags    : Request A records
+  reach    : 0x00000000 (Not Reachable)
+  order    : 300400
+--- scutil --proxy
+<dictionary> {
+  ExceptionsList : <array> {
+    0 : *.local
+    1 : 169.254/16
+  }
+  SOCKSEnable : 1
+  SOCKSPort : 11080
+  SOCKSProxy : 127.0.0.1
+}
+--- State:/Network/Service/*/IPv4
+  subKey [0] = State:/Network/Service/NOTHERING-OFFLINE/IPv4
+--- State:/Network/Global/IPv4
+<dictionary> {
+  PrimaryInterface : feth5478
+  PrimaryService : NOTHERING-OFFLINE
+  Router : 198.18.0.1
+}
+--- State:/Network/Global/IPv6
+  No such key
+--- ifconfig feth5478
+feth5478: flags=8843<UP,BROADCAST,RUNNING,SIMPLEX,MULTICAST> mtu 1500
+	options=8<VLAN_HWTAGGING>
+	ether 66:65:74:68:15:66
+	inet 198.18.0.2 netmask 0xffffff00 broadcast 198.18.0.255
+	peer: feth5479
+	media: autoselect (10Gbase-T <full-duplex>)
+	status: active
+--- what macOS tells apps
+path status: satisfied
+path interfaces: ["feth5478 (wiredEthernet)", "feth5478 (wiredEthernet)"]
+path supports IPv4: true, IPv6: false, DNS: true
+path expensive: false, constrained: false
+reachability of an internet address: reachable=true connectionRequired=false raw=3
+State:/Network/Global/IPv4: {
+    PrimaryInterface = feth5478;
+    PrimaryService = "NOTHERING-OFFLINE";
+    Router = "198.18.0.1";
+}
+State:/Network/Global/DNS: {
+    ServerAddresses =     (
+        "198.18.0.1"
+    );
+    "__CONFIGURATION_ID__" = "Default: NOTHERING-OFFLINE 0";
+    "__FLAGS__" = 2;
+    "__ORDER__" = 0;
+}
+IPv4 services: ["State:/Network/Service/NOTHERING-OFFLINE/IPv4"]
+proxies for apps: SOCKSEnable=1 SOCKSProxy=127.0.0.1 SOCKSPort=11080
+
+=================== stand-in taken down, network still away
+--- route -n get default
+route: writing to routing socket: not in table
+--- route -n get -inet6 default
+route: writing to routing socket: not in table
+--- netstat -rn -f inet (top)
+Routing tables
+
+Internet:
+Destination        Gateway            Flags               Netif Expire
+127                127.0.0.1          UCS                   lo0       
+127.0.0.1          127.0.0.1          UH                    lo0       
+224.0.0            link#1             UmCS                  lo0       
+--- scutil --nwi
+Network information
+
+IPv4 network interface information
+   No IPv4 states found
+
+   REACH : flags 0x00000000 (Not Reachable)
+
+IPv6 network interface information
+   No IPv6 states found
+
+
+   REACH : flags 0x00000000 (Not Reachable)
+--- scutil --dns (top)
+DNS configuration
+
+resolver #1
+  flags    : 
+  reach    : 0x00000000 (Not Reachable)
+
+resolver #2
+  domain   : local
+  options  : mdns
+  timeout  : 5
+  flags    : 
+  reach    : 0x00000000 (Not Reachable)
+  order    : 300000
+
+resolver #3
+  domain   : 254.169.in-addr.arpa
+  options  : mdns
+  timeout  : 5
+  flags    : 
+  reach    : 0x00000000 (Not Reachable)
+  order    : 300200
+
+resolver #4
+  domain   : 8.e.f.ip6.arpa
+  options  : mdns
+  timeout  : 5
+  flags    : 
+  reach    : 0x00000000 (Not Reachable)
+  order    : 300400
+
+--- scutil --proxy
+<dictionary> {
+}
+--- State:/Network/Service/*/IPv4
+  no keys.
+--- State:/Network/Global/IPv4
+  No such key
+--- State:/Network/Global/IPv6
+  No such key
+--- ifconfig feth5478
+ifconfig: interface feth5478 does not exist
+--- what macOS tells apps
+path status: unsatisfied
+path interfaces: []
+path supports IPv4: false, IPv6: false, DNS: false
+path expensive: false, constrained: false
+reachability of an internet address: reachable=false connectionRequired=false raw=0
+State:/Network/Global/IPv4: none
+State:/Network/Global/DNS: {
+    "__CONFIGURATION_ID__" = "Default: 0";
+    "__FLAGS__" = 0;
+    "__ORDER__" = 0;
+}
+IPv4 services: []
+proxies for apps: SOCKSEnable=none SOCKSProxy=none SOCKSPort=none
+
+=================== after: the machine's own network again
+--- route -n get default
+   route to: default
+destination: default
+       mask: default
+    gateway: 192.168.64.1
+  interface: en0
+      flags: <UP,GATEWAY,DONE,STATIC,PRCLONING,GLOBAL>
+ recvpipe  sendpipe  ssthresh  rtt,msec    rttvar  hopcount      mtu     expire
+       0         0         0         0         0         0      1500         0 
+--- route -n get -inet6 default
+route: writing to routing socket: not in table
+--- netstat -rn -f inet (top)
+Routing tables
+
+Internet:
+Destination        Gateway            Flags               Netif Expire
+default            192.168.64.1       UGScg                 en0       
+127                127.0.0.1          UCS                   lo0       
+127.0.0.1          127.0.0.1          UH                    lo0       
+169.254            link#5             UCS                   en0      !
+192.168.64         link#5             UCS                   en0      !
+192.168.64.1/32    link#5             UCS                   en0      !
+192.168.64.1       16:9d:99:28:15:64  UHLWIir               en0   1198
+192.168.64.5/32    link#5             UCS                   en0      !
+224.0.0/4          link#5             UmCS                  en0      !
+224.0.0.251        1:0:5e:0:0:fb      UHmLWI                en0       
+255.255.255.255/32 link#5             UCS                   en0      !
+--- scutil --nwi
+Network information
+
+IPv4 network interface information
+     en0 : flags      : 0x5 (IPv4,DNS)
+           address    : 192.168.64.5
+           reach      : 0x00000002 (Reachable)
+
+   REACH : flags 0x00000002 (Reachable)
+
+IPv6 network interface information
+   No IPv6 states found
+
+
+   REACH : flags 0x00000000 (Not Reachable)
+
+Network interfaces: en0
+--- scutil --dns (top)
+DNS configuration
+
+resolver #1
+  nameserver[0] : 192.168.64.1
+  if_index : 5 (en0)
+  flags    : Request A records
+  reach    : 0x00020002 (Reachable,Directly Reachable Address)
+
+resolver #2
+  domain   : local
+  options  : mdns
+  timeout  : 5
+  flags    : Request A records
+  reach    : 0x00000000 (Not Reachable)
+  order    : 300000
+
+resolver #3
+  domain   : 254.169.in-addr.arpa
+  options  : mdns
+  timeout  : 5
+  flags    : Request A records
+  reach    : 0x00000000 (Not Reachable)
+  order    : 300200
+
+resolver #4
+  domain   : 8.e.f.ip6.arpa
+  options  : mdns
+  timeout  : 5
+  flags    : Request A records
+  reach    : 0x00000000 (Not Reachable)
+--- scutil --proxy
+<dictionary> {
+  ExceptionsList : <array> {
+    0 : *.local
+    1 : 169.254/16
+  }
+  FTPPassive : 1
+}
+--- State:/Network/Service/*/IPv4
+  subKey [0] = State:/Network/Service/1EBB900E-307C-401A-89FF-F611B7C1A416/IPv4
+--- State:/Network/Global/IPv4
+<dictionary> {
+  PrimaryInterface : en0
+  PrimaryService : 1EBB900E-307C-401A-89FF-F611B7C1A416
+  Router : 192.168.64.1
+}
+--- State:/Network/Global/IPv6
+  No such key
+--- ifconfig feth5478
+ifconfig: interface feth5478 does not exist
+--- what macOS tells apps
+path status: satisfied
+path interfaces: ["en0 (wiredEthernet)", "en0 (wiredEthernet)"]
+path supports IPv4: true, IPv6: false, DNS: true
+path expensive: false, constrained: false
+reachability of an internet address: reachable=true connectionRequired=false raw=3
+State:/Network/Global/IPv4: {
+    PrimaryInterface = en0;
+    PrimaryService = "1EBB900E-307C-401A-89FF-F611B7C1A416";
+    Router = "192.168.64.1";
+}
+State:/Network/Global/DNS: {
+    ServerAddresses =     (
+        "192.168.64.1"
+    );
+    "__CONFIGURATION_ID__" = "Default: 1EBB900E-307C-401A-89FF-F611B7C1A416 0";
+    "__FLAGS__" = 2;
+    "__IF_INDEX__" = 5;
+    "__ORDER__" = 0;
+}
+IPv4 services: ["State:/Network/Service/1EBB900E-307C-401A-89FF-F611B7C1A416/IPv4"]
+proxies for apps: SOCKSEnable=none SOCKSProxy=none SOCKSPort=none

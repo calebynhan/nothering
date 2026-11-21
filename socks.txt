@@ -1,0 +1,2 @@
+command 1 to name name.nothering-probe.example port 80
+command 1 to address 192.0.2.10 port 80

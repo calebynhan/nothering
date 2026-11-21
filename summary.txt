@@ -1,0 +1,25 @@
+the stand-in proxy, asked directly: 'the stand-in network carried this'
+the machine's network is on en0
+helper up with a real network: 'this Mac has a network of its own' (it should decline)
+without the stand-in, what macOS tells apps: path status: unsatisfied;reachability of an internet address: reachable=false connectionRequired=false raw=0;proxies for apps: SOCKSEnable=none SOCKSProxy=none SOCKSPort=none;
+without the stand-in, connecting to an internet address: curl exit 7 (7 = didn't even try, 28 = tried and timed out)
+without the stand-in, an app fetching a page: fetch failed: NSURLErrorDomain -1009 The Internet connection appears to be offline.
+helper up with no network: exit 0
+default route with the stand-in: feth5478
+the service the Mac is on with the stand-in: NOTHERING-OFFLINE
+DNS servers with the stand-in: 198.18.0.1 
+with the stand-in, what macOS tells apps: path status: satisfied;reachability of an internet address: reachable=true connectionRequired=false raw=3;proxies for apps: SOCKSEnable=none SOCKSProxy=none SOCKSPort=none;
+with the stand-in, connecting to an internet address: curl exit 28 (7 = didn't even try, 28 = tried and timed out)
+with the stand-in, connecting to a name: curl exit 28 (6 = the name wasn't even looked up for long, 28 = the lookup or connection was tried and timed out)
+on the stand-in's wire: 2 questions for its router, 7 lookups sent to its DNS server
+with the stand-in and no proxy set, an app fetching a page: fetch failed: NSURLErrorDomain -1001 The request timed out.
+helper down: exit 0
+helper up with the proxy's port: exit 0
+with the proxy setting, what macOS tells apps: path status: satisfied;reachability of an internet address: reachable=true connectionRequired=false raw=3;proxies for apps: SOCKSEnable=1 SOCKSProxy=127.0.0.1 SOCKSPort=11080;
+with the proxy setting, an app fetching a page by name: fetch answered: status 200, body 'the stand-in network carried this'
+with the proxy setting, an app fetching a page by address: fetch answered: status 200, body 'the stand-in network carried this'
+what the proxy was asked for: command 1 to name name.nothering-probe.example port 80;command 1 to address 192.0.2.10 port 80;
+helper down: exit 0
+anything left behind: no
+proxy setting left behind: 0 lines about SOCKS (0 = none)
+the machine's network came back: yes
